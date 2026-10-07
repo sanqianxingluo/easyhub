@@ -145,3 +145,21 @@ GET /Videos/{id}/stream?Static=true&api_key=<token>
 - 4K HEVC 10bit 原盘（71GB，TrueHD + DTS-HD MA + PGS 字幕）实测 **硬解成功**
 - 打包 exe 后 `--probe` 实测：libmpv 正常加载、服务器正常连接
 - 无独显时状态栏会显示「硬解=软解」，一眼能看出有没有生效
+
+## 截图：必须拍真机屏幕，不要用 `widget.grab()`
+
+玻璃皮肤的窗口是半透明的，`widget.grab()` 会把子控件重复合成，**文字出现横向重影/发虚**，
+看上去像「名字只显示一半」——这个假象已经导致过一次误报（看着像被截断，上真机一看一位不少）。
+
+出交付截图一律用宿主的真实屏幕捕获：
+
+```
+qm sendkey <vmid> shift                              # 屏幕休眠时 screendump 会全黑，先唤醒
+printf 'screendump /tmp/x.ppm\n' | qm monitor <vmid>   # P6 裸 RGB，用 struct+zlib 自己写 PNG
+```
+
+`src/show_page.py` 负责把窗口停在指定页面并保持显示，配合上面的命令就能拿到真机画面：
+
+```
+python show_page.py lib|detail|player|servers
+```

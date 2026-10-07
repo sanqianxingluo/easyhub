@@ -1244,10 +1244,21 @@ class MainWindow(QMainWindow):
         self.refresh_server_label()
         QTimer.singleShot(80, self.start)
 
-    def _nav(self, text):
+    # 侧栏固定 216px：减 NavItem 的 margin(10+10) 与 padding(14+14) = 168px 文本宽度
+    NAV_TEXT_W = 168
+
+    def _nav(self, text, full=None):
         b = QPushButton(text)
         b.setObjectName("NavItem")
         b.setCheckable(True)
+        b.setToolTip(full or text)
+        # 名字太长就省略号收尾（并保留完整名字在 tooltip），别让按钮把字硬切一半
+        try:
+            fm = b.fontMetrics()
+            if fm.horizontalAdvance(text) > self.NAV_TEXT_W:
+                b.setText(fm.elidedText(text, Qt.ElideRight, self.NAV_TEXT_W))
+        except Exception:
+            pass
         self.nav_group.addButton(b)
         return b
 
@@ -1370,7 +1381,7 @@ class MainWindow(QMainWindow):
                 self.lib_box.addWidget(h)
             for v in groups[sid]:
                 ic = icons.get(v.get("CollectionType"), "▪")
-                b = self._nav("%s   %s" % (ic, v["Name"]))
+                b = self._nav("%s   %s" % (ic, v["Name"]), full=v["Name"])
                 b.setToolTip("来自：%s" % (v.get("server") or self.emby.server_name(sid)))
                 b.clicked.connect(lambda _=False, vv=v: self.show_lib(vv, vv["Name"]))
                 self.lib_box.addWidget(b)
