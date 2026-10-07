@@ -3,6 +3,15 @@
 Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit / 4K**，Emby 只负责取库和记进度，
 播放全程 **DirectStream（原画直达、不转码）**。界面是玻璃（Glassmorphism）风格，可打包成 exe。
 
+## 下载
+
+最新版本：**[v1.0.0](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.0)**
+
+- `EasyHub-Setup-1.0.0.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
+- `EasyHub-portable.exe`（89 MB）—— 便携单文件，双击即用，配置与程序同目录
+
+> 仓库私有，下载需登录本仓库的 GitHub 账号。
+
 ## 为什么自己做
 
 浏览器和 Electron 壳只能解 H.264/AAC，碰到 HEVC、DTS-HD、PGS 字幕就退回服务端转码 —— 4K 原盘根本没法看。
