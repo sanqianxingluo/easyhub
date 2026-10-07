@@ -336,9 +336,76 @@ class ServerPage(QWidget):
             l = QLabel("还没有服务器")
             l.setObjectName("Hint")
             self.box.insertWidget(0, l)
-            return
-        for conf in store.servers:
-            self.box.insertWidget(self.box.count() - 1, self._card(conf, multi))
+        else:
+            for conf in store.servers:
+                self.box.insertWidget(self.box.count() - 1, self._card(conf, multi))
+        # 解码设置（把所有服务器共用的偏好放最后）
+        self.box.insertWidget(self.box.count() - 1, self._decode_card(store))
+
+    def _decode_card(self, store):
+        """解码方式设置：自动检测硬解 / 强制软解 / 手动指定适配器。"""
+        try:
+            from player import list_adapters
+            adapters = list_adapters()
+        except Exception:
+            adapters = []
+        card = Glass("Glass")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setSpacing(9)
+        cl.addWidget(_title("解码", 13))
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(QLabel("方式"))
+        cb = QComboBox()
+        cb.addItem("自动检测硬解（推荐）", "auto")
+        cb.addItem("强制软解", "software")
+        cb.addItem("手动指定适配器", "manual")
+        cur = store.get_pref("decode", "auto")
+        idx = max(0, cb.findData(cur))
+        cb.setCurrentIndex(idx)
+        cb.setFixedWidth(210)
+        row.addWidget(cb)
+
+        row.addWidget(QLabel("适配器"))
+        acb = QComboBox()
+        acb.addItem("（未指定）", "")
+        for a in adapters:
+            acb.addItem(a, a)
+        ai = max(0, acb.findData(store.get_pref("adapter", "") or ""))
+        acb.setCurrentIndex(ai)
+        acb.setMinimumWidth(280)
+        row.addWidget(acb, 1)
+        cl.addLayout(row)
+
+        hint = QLabel("自动检测＝播放时逐个试适配器，用 mpv 的 hwdec-current 实测确认，"
+                      "成功的记下来下次直接用。虚拟显卡和核显混在一起时这个最靠谱。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        cl.addWidget(hint)
+
+        lbl_state = QLabel("")
+        lbl_state.setObjectName("Hint")
+        cl.addWidget(lbl_state)
+
+        def _sync(*_a):
+            mode = cb.currentData()
+            acb.setEnabled(mode == "manual")
+            store.set_pref("decode", mode)
+            if mode == "manual":
+                store.set_pref("adapter", acb.currentData() or "")
+            lbl_state.setText("已保存：%s%s" % (
+                cb.currentText(),
+                ("  ·  " + (acb.currentData() or "")) if mode == "manual" else ""))
+
+        cb.currentIndexChanged.connect(_sync)
+        acb.currentIndexChanged.connect(_sync)
+        acb.setEnabled(cur == "manual")
+
+        if not adapters:
+            lbl_state.setText("没探测到显卡适配器（不影响播放，会自动走软解）")
+        return card
 
     def _card(self, conf, multi):
         card = Glass("Glass")

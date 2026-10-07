@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QScrollArea, QGridLayout, QComboBox, QSpacerItem, QDialog)
 
 from theme import QSS
-from player import MpvPlayer, detect_adapters
+from player import MpvPlayer, detect_adapters, list_adapters
 from emby import Emby, EmbyError
 from library import MultiEmby
 from paths import cache_dir
@@ -256,7 +256,11 @@ class PosterGrid(QListWidget):
         title = data.get("Name", "?")
         if len(title) > 26:
             title = title[:25] + "…"
-        it.setText("%s\n%s%s" % (title, yr, badge))
+        line2 = "%s%s" % (yr, badge)
+        srv = data.get("_srvname") or ""
+        if srv:
+            line2 += "  ·  " + (srv[:8] + "…" if len(srv) > 9 else srv)
+        it.setText("%s\n%s" % (title, line2))
         it.setData(Qt.UserRole, data)
         it.setToolTip(data.get("Name", ""))
         it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
@@ -659,6 +663,15 @@ class PlayerPage(QWidget):
         self.play_session = None
         self._drag = False
         self._idle = 0
+        # ── 画质 / 解码 / 带宽监控 ──
+        self.store = None          # MainWindow 通过 attach() 注入
+        self.adapters = list_adapters()
+        self.quality = None        # None=原画；数字=码率上限
+        self._url = None
+        self.play_method = None
+        self._hw_done = True       # 本轮播放是否已确定硬解
+        self._hw_idx = 0
+        self._warn_lock = 0
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -674,10 +687,22 @@ class PlayerPage(QWidget):
         # ── 烟熏玻璃控制条 ──
         self.bar = QFrame()
         self.bar.setObjectName("CtrlBar")
-        self.bar.setFixedHeight(100)
+        self.bar.setFixedHeight(122)
         bl = QVBoxLayout(self.bar)
-        bl.setContentsMargins(16, 8, 16, 8)
+        bl.setContentsMargins(16, 4, 16, 8)
         bl.setSpacing(4)
+
+        # 顶部信息行：左边告警（平时空着），右边实时状态（硬解/码率/拉流/缓存）
+        top = QHBoxLayout()
+        top.setSpacing(14)
+        self.lbl_warn = QLabel("")
+        self.lbl_warn.setObjectName("WarnLabel")
+        top.addWidget(self.lbl_warn, 1)
+        self.lbl_stat = QLabel("")
+        self.lbl_stat.setObjectName("StatLabel")
+        self.lbl_stat.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        top.addWidget(self.lbl_stat)
+        bl.addLayout(top)
 
         row1 = QHBoxLayout()
         row1.setSpacing(10)
@@ -707,22 +732,20 @@ class PlayerPage(QWidget):
         self.btn_f30 = self._tool("30s ⏩", lambda: self.player.seek_rel(30))
         self.btn_audio = self._tool("音轨", self.menu_audio)
         self.btn_sub = self._tool("字幕", self.menu_sub)
+        self.btn_qual = self._tool("画质", self.menu_quality)
         self.btn_vol = self._tool("🔊", self.menu_vol)
         self.btn_full = self._tool("⛶", lambda: self.window().toggle_fullscreen())
 
         self.lbl_title = QLabel("")
-        self.lbl_stat = QLabel("")
-        self.lbl_stat.setObjectName("StatLabel")
 
         for w in (self.btn_back, self.btn_b30, self.btn_b10, self.btn_play,
                   self.btn_f10, self.btn_f30):
             row2.addWidget(w)
         row2.addSpacing(8)
-        for w in (self.btn_audio, self.btn_sub, self.btn_vol, self.btn_full):
+        for w in (self.btn_audio, self.btn_sub, self.btn_qual, self.btn_vol, self.btn_full):
             row2.addWidget(w)
         row2.addSpacing(12)
         row2.addWidget(self.lbl_title, 1)
-        row2.addWidget(self.lbl_stat)
         bl.addLayout(row2)
 
         v.addWidget(self.bar)
@@ -747,6 +770,17 @@ class PlayerPage(QWidget):
         self.tick = QTimer(self)
         self.tick.timeout.connect(self._tick)
         self.tick.start(400)
+
+        # 硬解自动探测（每 1.2s 看一次实测硬解状态）
+        self.hwchk = QTimer(self)
+        self.hwchk.timeout.connect(self._check_hwdec)
+        self.hwchk.setInterval(1200)
+
+    # ---------- 注入设置 ----------
+    def attach(self, store):
+        """MainWindow 在构造后调用：把服务器/偏好存储接进来。"""
+        self.store = store
+        self.adapters = list_adapters()
 
     def _tool(self, text, fn):
         b = QPushButton(text)
@@ -794,7 +828,15 @@ class PlayerPage(QWidget):
             self.play_session = None
         self.lbl_title.setText(item.get("Name", ""))
         start = start_ticks / 10_000_000 if start_ticks else None
-        self.player.play(emby.stream_url(item), start_seconds=start)
+        self.quality = self.store.get_pref("quality") if self.store else None
+        url, method, _br = emby.playback_plan(item, self.quality, start_ticks or 0)
+        self._url, self.play_method = url, method
+        adapter, hwdec = self._decoder()
+        self._warn_hold = 0
+        self._hw_done = False
+        self._hw_idx = 0
+        self.lbl_warn.setText("")
+        self.player.reopen(url, start_seconds=start, adapter=adapter, hwdec=hwdec)
         if not start:
             self.player.set_pause(False)
         try:
@@ -802,7 +844,102 @@ class PlayerPage(QWidget):
         except EmbyError:
             pass
         self.rep.start()
+        self.hwchk.start()
         self.poke()
+
+    # ---------- 解码 / 画质 ----------
+    def _decoder(self):
+        """按偏好返回 (适配器, hwdec 模式)。"""
+        prefs = self.store.prefs if self.store else {}
+        mode = prefs.get("decode", "auto")
+        if mode == "software":
+            return None, "no"
+        return (prefs.get("adapter") or None), "d3d11va"
+
+    def _set_warn(self, text, hold=0):
+        self.lbl_warn.setText(text)
+        self._warn_hold = time.time() + hold
+
+    def _check_hwdec(self):
+        """看实测硬解有没有真的起来；没起来就换下一个适配器试。"""
+        if self._hw_done or not self.cur_item:
+            return
+        prefs = self.store.prefs if self.store else {}
+        if prefs.get("decode", "auto") != "auto":
+            self._hw_done = True
+            return
+        if self.player.dur <= 0 or self.player.hwdec_current is None:
+            return                      # 还没开始播
+        if self.player.hwdec_ok:
+            self._hw_done = True
+            self.hwchk.stop()
+            if self.player.adapter and self.store:
+                if self.store.get_pref("adapter") != self.player.adapter:
+                    self.store.set_pref("adapter", self.player.adapter)
+                    self._set_warn("硬解已生效（%s）—— 已记住这个适配器"
+                                   % self.player.hwdec_current, hold=8)
+            return
+        # hwdec-current == 'no' → 这个适配器不行，换下一个
+        self._try_next_adapter()
+
+    def _try_next_adapter(self):
+        cands = self.adapters or []
+        i = self._hw_idx
+        # 跳过已经试过的那个
+        while i < len(cands) and cands[i] == self.player.adapter:
+            i += 1
+        if i >= len(cands):
+            self._hw_done = True
+            self.hwchk.stop()
+            self._set_warn("⚠ 硬解没成功（%d 个适配器都试过）—— 已退到软件解码：画面没问题，"
+                           "但 CPU 占用会高；可在「画质」菜单里手动指定"
+                           % len(cands), hold=15)
+            return
+        name = cands[i]
+        self._hw_idx = i + 1
+        pos = self.player.pos or 0
+        self._set_warn("硬解没生效，正在试适配器：%s（%d/%d）"
+                       % (name, self._hw_idx, len(cands)), hold=6)
+        self.player.reopen(self._url, start_seconds=pos, adapter=name)
+
+    def redetect_hwdec(self):
+        """手动重新检测（画质菜单里）。"""
+        self.adapters = list_adapters()
+        self._hw_idx = 0
+        self._hw_done = False
+        if self.store:
+            self.store.set_pref("adapter", "")
+        self._set_warn("开始重新检测硬解适配器…", hold=8)
+        self._try_next_adapter()
+
+    def menu_quality(self):
+        m = QMenu(self)
+        cur = self.quality
+        for label, val in Emby.QUALITY_CHOICES:
+            a = m.addAction(label)
+            a.setCheckable(True)
+            a.setChecked((val is None and not cur) or
+                         (bool(val) and bool(cur) and int(val) == int(cur)))
+            a.triggered.connect(lambda _=False, v=val: self.set_quality(v))
+        m.addSeparator()
+        a = m.addAction("重新自动检测硬解")
+        a.triggered.connect(self.redetect_hwdec)
+        m.exec(self.btn_qual.mapToGlobal(self.btn_qual.rect().bottomLeft()))
+
+    def set_quality(self, v):
+        """切画质档：原画 <-> 限码率（服务端转码），并保持当前进度。"""
+        if self.store:
+            self.store.set_pref("quality", v)
+        self.quality = v
+        if not (self.emby and self.cur_item):
+            return
+        pos = self.player.pos or 0
+        url, method, _b = self.emby.playback_plan(self.cur_item, v, int(pos * 10_000_000))
+        self._url, self.play_method = url, method
+        adapter, hwdec = self._decoder()
+        self.player.reopen(url, start_seconds=pos, adapter=adapter, hwdec=hwdec)
+        self._set_warn("已切到：%s" % ("原画直连" if not v else "限码率 %.0f Mbps（服务端转码）"
+                                     % (v / 1e6)), hold=6)
 
     def _report(self):
         if not (self.emby and self.cur_item):
@@ -838,6 +975,10 @@ class PlayerPage(QWidget):
             except EmbyError:
                 pass
         self.rep.stop()
+        try:
+            self.hwchk.stop()
+        except Exception:
+            pass
         self.player.stop()
 
     # ---------- 进度 ----------
@@ -884,15 +1025,34 @@ class PlayerPage(QWidget):
         w, h = self.player.width, self.player.height
         bits = []
         if w:
-            bits.append(f"{w}x{h}")
+            bits.append("%dx%d" % (w, h))
         sc = self._short_codec(self.player.video_codec)
         if sc:
             bits.append(sc)
-        bits.append("硬解=" + (self.player.hwdec or "软解"))
+        hc = self.player.hwdec_current
+        bits.append("硬解=" + (str(hc) if (hc and self.player.hwdec_ok) else "软解"))
+        br = self.player.video_bitrate
+        sp = self.player.cache_speed
+        if br:
+            bits.append("码率 %.1fM" % (br / 1e6))
+        if sp:
+            bits.append("拉流 %.1fM" % (sp * 8 / 1e6))
+        cd = self.player.cache_duration
+        if cd:
+            bits.append("缓存 %.0fs" % cd)
         if self.player.adapter:
             nm = self.player.adapter.replace("Intel(R) ", "").replace(" Graphics", "")
-            bits.append("GPU=" + nm[:20])
+            bits.append("GPU=" + nm[:18])
         self.lbl_stat.setText("   ".join(bits))
+
+        # 带宽告警：拉流速度追不上码率 = 服务器上传不够
+        if self.player.dur > 0 and time.time() >= getattr(self, "_warn_hold", 0):
+            if self.player.starving:
+                self.lbl_warn.setText(
+                    "⚠ 网络跟不上（拉流 %.1f Mbps < 码率 %.1f Mbps）"
+                    "—— 点「画质」切到限码率" % (sp / 1e6, br / 1e6))
+            elif self.lbl_warn.text().startswith("⚠ 网络"):
+                self.lbl_warn.setText("")
 
     # ---------- 菜单 ----------
     def menu_audio(self):
@@ -950,8 +1110,12 @@ class MainWindow(QMainWindow):
         self.resize(1360, 840)
         self.setMinimumSize(980, 640)
 
-        adapters, adapter = detect_adapters()
-        self.gpu_all = adapters
+        self.gpu_all = list_adapters()
+        # 初始用「上次探测成功记住的适配器」，没有就先用第一个（最像真实 GPU 的），
+        # 播放后仍会用 hwdec-current 实测确认，不行会自动换下一个。
+        adapter = store.get_pref("adapter") or (self.gpu_all[0] if self.gpu_all else None)
+        if store.get_pref("decode") == "software":
+            adapter = None
 
         root = QWidget()
         root.setObjectName("Root")
@@ -1050,6 +1214,7 @@ class MainWindow(QMainWindow):
         self.page_detail.back_requested.connect(self.close_detail)
         self.page_detail.play_requested.connect(self.play)
         self.page_player = PlayerPage(adapter)
+        self.page_player.attach(store)
         self.page_player.back_requested.connect(self.close_player)
 
         self.page_welcome = WelcomePage()
@@ -1189,12 +1354,26 @@ class MainWindow(QMainWindow):
             views = []
         icons = {"movies": "◆", "tvshows": "▣", "music": "♪", "livetv": "◉",
                  "homevideos": "▤", "books": "▥", "boxsets": "◈", "musicvideos": "♫"}
+        # 按服务器分组 —— 不合并，各管各的
+        groups, order = {}, []
         for v in views:
-            ic = icons.get(v.get("CollectionType"), "▪")
-            b = self._nav("%s   %s" % (ic, v["Name"]))
-            b.setToolTip("来自：" + "、".join(v.get("servers") or []))
-            b.clicked.connect(lambda _=False, vv=v: self.show_lib(vv, vv["Name"]))
-            self.lib_box.addWidget(b)
+            sid = v.get("_srv")
+            if sid not in groups:
+                groups[sid] = []
+                order.append(sid)
+            groups[sid].append(v)
+        multi = len(order) > 1
+        for sid in order:
+            if multi:
+                h = QLabel(self.emby.server_name(sid))
+                h.setObjectName("SideSub")
+                self.lib_box.addWidget(h)
+            for v in groups[sid]:
+                ic = icons.get(v.get("CollectionType"), "▪")
+                b = self._nav("%s   %s" % (ic, v["Name"]))
+                b.setToolTip("来自：%s" % (v.get("server") or self.emby.server_name(sid)))
+                b.clicked.connect(lambda _=False, vv=v: self.show_lib(vv, vv["Name"]))
+                self.lib_box.addWidget(b)
 
     def _clear_grid(self):
         self.page_browse.grid.clear_all()
@@ -1205,6 +1384,9 @@ class MainWindow(QMainWindow):
         key = "%s:%s" % (it.get("_srv") or "x", iid)
         tag = (it.get("ImageTags") or {}).get("Primary")
         data = dict(it)
+        # 只有一台服务器时不用逐张标出处；多台才标（各管各的，必须看得清来源）
+        data["_srvname"] = (self.emby.server_name(it.get("_srv"))
+                            if len(getattr(self.emby, "clients", {}) or {}) > 1 else "")
         if prefix:
             data["Name"] = prefix + it.get("Name", "")
         self.page_browse.grid.add_entry(data, key,
@@ -1228,10 +1410,7 @@ class MainWindow(QMainWindow):
             items = self.emby.view_items(view, 500, types)
             for it in items:
                 self._add(it)
-            txt = "共 %d 项" % len(items)
-            if view.get("multi"):
-                txt += "   ·   合并自 %d 个服务器" % len(view.get("sources") or [])
-            self.lbl_count.setText(txt)
+            self.lbl_count.setText("共 %d 项   ·   %s" % (len(items), view.get("server") or ""))
             # 用库内第一部片的背景图当页面模糊底
             pick = None
             for it in items[:6]:

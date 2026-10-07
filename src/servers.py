@@ -224,11 +224,20 @@ class ServerConf:
                           enabled=d.get("enabled", True))
 
 
+# 全局偏好（不属于某个服务器）
+DEFAULT_PREFS = {
+    "decode": "auto",     # auto = 自动探测硬解适配器 / software = 强制软解 / manual = 用下面这个
+    "adapter": "",        # decode=manual 时生效
+    "quality": None,      # None = 原画直连；数字 = 码率上限（bps），交给服务端转码
+}
+
+
 class ServerStore:
     def __init__(self, path=None, migrate=True):
         self.path = path or data_path(CONF_NAME)
         self.migrate = migrate
         self.servers = []
+        self.prefs = dict(DEFAULT_PREFS)
         self.load()
 
     # ---------- 读写 ----------
@@ -239,6 +248,8 @@ class ServerStore:
                 d = json.load(f)
             for s in d.get("servers", []):
                 self.servers.append(ServerConf.from_dict(s))
+            self.prefs = dict(DEFAULT_PREFS)
+            self.prefs.update(d.get("prefs") or {})
         except Exception:
             self.servers = []
         if not self.servers and getattr(self, "migrate", True):
@@ -270,8 +281,8 @@ class ServerStore:
     def save(self):
         try:
             with open(self.path, "w", encoding="utf-8") as f:
-                json.dump({"servers": [s.to_dict() for s in self.servers]}, f,
-                          ensure_ascii=False, indent=2)
+                json.dump({"servers": [s.to_dict() for s in self.servers],
+                           "prefs": self.prefs}, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
@@ -298,3 +309,11 @@ class ServerStore:
 
     def enabled(self):
         return [s for s in self.servers if s.enabled]
+
+    # ---------- 偏好 ----------
+    def get_pref(self, k, default=None):
+        return self.prefs.get(k, DEFAULT_PREFS.get(k, default))
+
+    def set_pref(self, k, v):
+        self.prefs[k] = v
+        self.save()

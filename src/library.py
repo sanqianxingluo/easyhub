@@ -41,8 +41,10 @@ class MultiEmby:
             last = None
             for base in bases:
                 try:
+                    # attempts=3：Emby 偶发 500（token 校验/登录都可能中招），
+                    # 只试一次会让整台服务器「连不上」。这个坑实测踩过。
                     client = Emby(base, conf.username, conf.password,
-                                  token=conf.token).connect(attempts=1)
+                                  token=conf.token).connect(attempts=3)
                     self.bases[conf.id] = base
                     break
                 except EmbyError as e:
@@ -90,52 +92,33 @@ class MultiEmby:
             raise EmbyError("没有可用的服务器")
         return c
 
-    # ══════════ 媒体库（按 名称+类型 合并） ══════════
+    # ══════════ 媒体库（**不合并**：每个服务器的库各自成条目） ══════════
     def views(self):
-        groups, order = {}, []
+        """返回所有服务器各自的媒体库。同名库也不合并 —— 各管各的。"""
+        out = []
         for sid, cli in self.clients.items():
             try:
                 vs = cli.views()
             except EmbyError:
                 continue
             for v in vs:
-                k = ((v.get("CollectionType") or ""), (v.get("Name") or "").strip())
-                if k not in groups:
-                    groups[k] = []
-                    order.append(k)
-                groups[k].append((sid, v))
-        out = []
-        for k in order:
-            srcs = groups[k]
-            base = dict(srcs[0][1])
-            base["sources"] = [(s, v["Id"]) for s, v in srcs]
-            base["_srv"] = srcs[0][0]
-            base["multi"] = len(srcs) > 1
-            base["servers"] = [self.server_name(s) for s, _ in srcs]
-            out.append(base)
+                e = dict(v)
+                e["_srv"] = sid
+                e["server"] = self.server_name(sid)
+                out.append(e)
         return out
 
     def view_items(self, view, limit=500, item_types=None):
-        """取一个库的内容；多服务器同名的库会自动合并去重。"""
-        merged = bool(view.get("multi"))
-        seen, out = set(), []
-        for sid, vid in (view.get("sources") or [(view.get("_srv"), view.get("Id"))]):
-            cli = self.clients.get(sid)
-            if cli is None:
-                continue
-            try:
-                d = cli.items(vid, 0, limit, True, include_item_types=item_types)
-            except EmbyError:
-                continue
-            for it in self._tag(sid, d.get("Items", [])):
-                if merged:
-                    k = _key(it)
-                    if k in seen:
-                        self.dupes += 1
-                        continue
-                    seen.add(k)
-                out.append(it)
-        return out
+        """取某个库的内容（只属于它自己那台服务器）。"""
+        sid = view.get("_srv")
+        cli = self.clients.get(sid)
+        if cli is None:
+            return []
+        try:
+            d = cli.items(view.get("Id"), 0, limit, True, include_item_types=item_types)
+        except EmbyError:
+            return []
+        return self._tag(sid, d.get("Items", []))
 
     def children(self, item, limit=600):
         cli = self.client_for(item)
@@ -152,15 +135,7 @@ class MultiEmby:
                 continue
         if sort_key:
             out.sort(key=sort_key, reverse=True)
-        seen, res = set(), []
-        for it in out:
-            k = _key(it)
-            if k in seen:
-                self.dupes += 1
-                continue
-            seen.add(k)
-            res.append(it)
-        return res[:limit]
+        return out[:limit]        # 不去重：同一部片在不同服务器上就各显示各的
 
     def resume(self, limit=48):
         return self._gather(lambda c, n: c.resume(n).get("Items", []), limit, _played)
@@ -181,17 +156,21 @@ class MultiEmby:
     def stream_url(self, item):
         return self.client_for(item).stream_url(item["Id"])
 
+    def playback_plan(self, item, max_bitrate=None, start_ticks=0):
+        """按画质档位拿播放地址（原画直链 / 服务端转码），并路由到对的服务器。"""
+        return self.client_for(item).playback_plan(item["Id"], max_bitrate, start_ticks)
+
     def playback_info(self, item):
         return self.client_for(item).playback_info(item["Id"])
 
-    def report_start(self, item, ticks=0, ps=None):
-        return self.client_for(item).report_start(item["Id"], ticks, ps)
+    def report_start(self, item, position_ticks=0, play_session=None):
+        return self.client_for(item).report_start(item["Id"], position_ticks, play_session)
 
-    def report_progress(self, item, ticks, paused=False, ps=None):
-        return self.client_for(item).report_progress(item["Id"], ticks, paused, ps)
+    def report_progress(self, item, position_ticks, paused=False, play_session=None):
+        return self.client_for(item).report_progress(item["Id"], position_ticks, paused, play_session)
 
-    def report_stopped(self, item, ticks, ps=None):
-        return self.client_for(item).report_stopped(item["Id"], ticks, ps)
+    def report_stopped(self, item, position_ticks, play_session=None):
+        return self.client_for(item).report_stopped(item["Id"], position_ticks, play_session)
 
     def mark_played(self, item, played=True):
         return self.client_for(item).mark_played(item["Id"], played)
@@ -216,7 +195,7 @@ class MultiEmby:
                 continue
             try:
                 cli = Emby(e.url, conf.username, conf.password,
-                           token=conf.token).connect(attempts=1)
+                           token=conf.token).connect(attempts=2)
                 results[-1] = (e.url, True, cli.server_name)
                 return e.url, cli, results
             except EmbyError as ex:

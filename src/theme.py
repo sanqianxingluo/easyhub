@@ -196,4 +196,13 @@ QCheckBox::indicator:checked {{ background: {ACCENT_1}; border: 1px solid {ACCEN
 QCheckBox:disabled {{ color: {TEXT_DIM2}; }}
 QLabel#FieldLabel {{ color: {TEXT_DIM}; }}
 QDialog {{ background: #0d1119; }}
+
+QLabel#WarnLabel {{ color: #ffd166; font-size: 12px; }}
+QLabel#SideSub {{
+    color: {TEXT_DIM2};
+    font-size: 11px;
+    font-weight: bold;
+    padding: 10px 18px 2px 18px;
+    letter-spacing: 1px;
+}}
 """

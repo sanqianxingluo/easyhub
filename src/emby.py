@@ -5,7 +5,11 @@ import time
 import urllib.parse
 import urllib.request
 
-CLIENT = 'MediaBrowser Client="Hermes PC Player", Device="PC", DeviceId="hermes-pc-player", Version="1.0.0"'
+# 注意：DeviceId 必须是 GUID 格式。用普通字符串（如 "hermes-pc-player"）时，
+# Emby 的 /Users/Me 会回 500「Unrecognized Guid format.」—— 实测踩过。
+DEVICE_ID = "7e3a9c21-5b44-4e8a-9f2d-1c6b7a0e4d33"
+CLIENT = ('MediaBrowser Client="EasyHub", Device="PC", '
+          'DeviceId="%s", Version="1.0.0"' % DEVICE_ID)
 
 
 class EmbyError(Exception):
@@ -134,6 +138,55 @@ class Emby:
     def stream_url(self, item_id):
         """直连原画（Static=true 表示服务端不做任何转码）。"""
         return "%s/Videos/%s/stream?Static=true&api_key=%s" % (self.server, item_id, self.token)
+
+    # 画质档位：None = 原画直连；数字 = 码率上限（bps），超过就让服务端转码
+    QUALITY_CHOICES = [
+        ("原画直连（不转码）", None),
+        ("40 Mbps", 40_000_000),
+        ("20 Mbps", 20_000_000),
+        ("10 Mbps", 10_000_000),
+        ("6 Mbps", 6_000_000),
+        ("3 Mbps", 3_000_000),
+    ]
+
+    def playback_plan(self, item_id, max_bitrate=None, start_ticks=0):
+        """决定这次怎么播，返回 (url, 方式, 服务端给的码率)。
+
+        原画     → 直接 Static=true 直链（最省事、画质最好、但吃满带宽）
+        限码率   → 走 PlaybackInfo 协商，让服务端给一条转码地址（hls/ts）
+        """
+        if not max_bitrate:
+            return self.stream_url(item_id), "DirectPlay", None
+        cap = int(max_bitrate)
+        prof = {
+            "MaxStreamingBitrate": cap,
+            "DirectPlayProfiles": [],        # 不给直连档 → 强制转码
+            "TranscodingProfiles": [{
+                "Container": "ts", "Type": "Video", "VideoCodec": "h264",
+                "AudioCodec": "aac", "Protocol": "hls", "Context": "Streaming",
+                "MaxAudioChannels": "2",
+            }],
+            "ContainerProfiles": [], "CodecProfiles": [], "SubtitleProfiles": [],
+        }
+        body = {"UserId": self.user_id, "StartTimeTicks": int(start_ticks),
+                "IsPlayback": True, "AutoOpenLiveStream": True,
+                "MaxStreamingBitrate": cap, "DeviceProfile": prof}
+        try:
+            d = self._req("/Items/%s/PlaybackInfo" % item_id, "POST", body)
+        except EmbyError:
+            return self.stream_url(item_id), "DirectPlay", None
+        srcs = d.get("MediaSources") or []
+        if not srcs:
+            return self.stream_url(item_id), "DirectPlay", None
+        src = srcs[0]
+        url = src.get("TranscodingUrl") or src.get("DirectStreamUrl")
+        if not url:
+            return self.stream_url(item_id), "DirectPlay", None
+        if not url.lower().startswith("http"):
+            url = self.server + url
+        if "api_key=" not in url:
+            url += ("&" if "?" in url else "?") + "api_key=" + str(self.token)
+        return url, "Transcode", src.get("Bitrate")
 
     def image_url(self, item_id, kind="Primary", max_h=400, tag=None):
         u = "%s/Items/%s/Images/%s?maxHeight=%d&quality=90&api_key=%s" % (
