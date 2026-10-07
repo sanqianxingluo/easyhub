@@ -1,0 +1,30 @@
+# ── 运行时产物 ──
+__pycache__/
+*.py[cod]
+cache/
+dist/
+build/
+*.spec
+
+# ── 配置与凭据（绝对不提交）──
+servers.json
+config.json
+*.env
+.env
+portable.txt
+*.token
+
+# ── 日志与自检产物 ──
+*.log
+error.log
+probe_result.json
+selftest_result.json
+uiflow_result.json
+
+# ── 截图 / 打包残留 ──
+cap_*.png
+shot_*.png
+*.ppm
+
+# ── 旧的临时备份 ──
+src/ui_v1_backup.py
