@@ -1156,17 +1156,28 @@ class MainWindow(QMainWindow):
         t2.setObjectName("SideTitle")
         sv.addWidget(t2)
 
-        self.lib_box = QVBoxLayout()
+        # 库名列表放进滚动区：库多时侧栏高度不够，直接塞进布局会把每个按钮压扁
+        # （实测 14 个库 → 按钮 38px 被挤到 29px → 文字纵向压成一条）。
+        # 滚动区自己消化溢出，配合 NAV_H 固定高度，字形永远不会被压。
+        self.lib_area = QScrollArea()
+        self.lib_area.setObjectName("LibArea")
+        self.lib_area.setWidgetResizable(True)
+        self.lib_area.setFrameShape(QFrame.NoFrame)
+        self.lib_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lib_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        lib_inner = QWidget()
+        lib_inner.setObjectName("LibInner")
+        self.lib_box = QVBoxLayout(lib_inner)
         self.lib_box.setSpacing(0)
         self.lib_box.setContentsMargins(0, 0, 0, 0)
-        sv.addLayout(self.lib_box)
+        self.lib_box.addStretch(1)
+        self.lib_area.setWidget(lib_inner)
+        sv.addWidget(self.lib_area, 1)
 
         self.side_empty = QLabel("还没有接入服务器")
         self.side_empty.setObjectName("Hint")
         self.side_empty.setContentsMargins(18, 6, 12, 0)
         sv.addWidget(self.side_empty)
-
-        sv.addStretch(1)
 
         t3 = QLabel("设置")
         t3.setObjectName("SideTitle")
@@ -1246,12 +1257,17 @@ class MainWindow(QMainWindow):
 
     # 侧栏固定 216px：减 NavItem 的 margin(10+10) 与 padding(14+14) = 168px 文本宽度
     NAV_TEXT_W = 168
+    # 每个导航项固定高度。绝不能让它被布局压缩：项一多时布局会把按钮从 38px 挤到 29px，
+    # Qt 为了塞进去会把文字**纵向压扁**（14 个库时实测，字高从 11px 掉到 5px，完全没法看）
+    NAV_H = 38
 
     def _nav(self, text, full=None):
         b = QPushButton(text)
         b.setObjectName("NavItem")
         b.setCheckable(True)
         b.setToolTip(full or text)
+        b.setFixedHeight(self.NAV_H)
+        b.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         # 名字太长就省略号收尾（并保留完整名字在 tooltip），别让按钮把字硬切一半
         try:
             fm = b.fontMetrics()
