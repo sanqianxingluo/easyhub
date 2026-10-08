@@ -284,6 +284,267 @@ class PosterGrid(QListWidget):
         it.setIcon(QIcon(pm))
 
 
+# ═══════════════════════ 首页：随机推荐 + 媒体库表 ═══════════════════════
+ICONS = {"movies": "◆", "tvshows": "▣", "music": "♪", "livetv": "◉",
+         "homevideos": "▤", "books": "▥", "boxsets": "◈", "musicvideos": "♫"}
+KINDS = {"movies": "电影", "tvshows": "剧集", "music": "音乐", "livetv": "电视直播",
+         "homevideos": "家庭视频", "books": "图书", "boxsets": "合集", "musicvideos": "音乐视频"}
+
+
+class PosterCard(QFrame):
+    """推荐位的一张海报卡（点进详情）。"""
+    clicked = Signal(dict)
+
+    def __init__(self, w=158, h=237, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RecCard")
+        self.setCursor(Qt.PointingHandCursor)
+        self.data = None
+        self._w, self._h = w, h
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(7)
+        self.pic = QLabel()
+        self.pic.setFixedSize(w, h)
+        self.pic.setObjectName("RecPic")
+        self.pic.setAlignment(Qt.AlignCenter)
+        v.addWidget(self.pic)
+        self.name = QLabel("")
+        self.name.setObjectName("RecName")
+        self.name.setFixedWidth(w)
+        self.name.setAlignment(Qt.AlignHCenter)
+        v.addWidget(self.name)
+
+    def set_item(self, it, url):
+        self.data = it
+        t = it.get("Name", "")
+        self.name.setText(t if len(t) <= 12 else t[:11] + "…")
+        self.name.setToolTip("%s%s" % (t, ("  (%s)" % it["ProductionYear"]) if it.get("ProductionYear") else ""))
+        fetch_async(url, self._got)
+
+    def _got(self, img):
+        if img is None or img.isNull():
+            return
+        pm = QPixmap.fromImage(img).scaled(self._w, self._h,
+                                          Qt.KeepAspectRatioByExpanding,
+                                          Qt.SmoothTransformation)
+        if pm.width() > self._w or pm.height() > self._h:
+            pm = pm.copy((pm.width() - self._w) // 2, 0, self._w, self._h)
+        self.pic.setPixmap(pm)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.data:
+            self.clicked.emit(self.data)
+
+
+class LibTile(QFrame):
+    """媒体库表里的一格（点进那个库）。"""
+    clicked = Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("LibTile")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(74)
+        self.data = None
+        h = QHBoxLayout(self)
+        h.setContentsMargins(16, 11, 14, 11)
+        h.setSpacing(13)
+        self.ic = QLabel("▪")
+        self.ic.setObjectName("LibIcon")
+        self.ic.setFixedWidth(28)
+        self.ic.setAlignment(Qt.AlignCenter)
+        h.addWidget(self.ic)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        self.title = QLabel("")
+        self.title.setObjectName("LibName")
+        self.sub = QLabel("")
+        self.sub.setObjectName("Hint")
+        col.addWidget(self.title)
+        col.addWidget(self.sub)
+        h.addLayout(col, 1)
+        self.cnt = QLabel("")
+        self.cnt.setObjectName("Hint")
+        self.cnt.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        h.addWidget(self.cnt)
+
+    def set_view(self, v):
+        self.data = v
+        name = v.get("Name", "")
+        self.ic.setText(ICONS.get(v.get("CollectionType"), "▪"))
+        self.title.setText(name)
+        self.title.setToolTip(name)
+        srv = v.get("server") or ""
+        kind = KINDS.get(v.get("CollectionType"), "媒体库")
+        self.sub.setText(("%s  ·  %s" % (kind, srv)) if srv else kind)
+        self.cnt.setText("…")
+
+    def set_count(self, n):
+        self.cnt.setText(("%d 项" % n) if n else "")
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.data:
+            self.clicked.emit(self.data)
+
+
+class _CountTask(QRunnable):
+    """后台数每个库有多少项（Limit=1 只看总数），别卡界面。"""
+    def __init__(self, emby, views, cb):
+        super().__init__()
+        self.emby, self.views, self.cb = emby, views, cb
+
+    def run(self):
+        out = []
+        for v in self.views:
+            out.append((v.get("Id"), v.get("_srv"), self.emby.view_count(v)))
+        try:
+            self.cb(out)
+        except RuntimeError:
+            pass
+
+
+class HomePage(GlassBackdrop):
+    """首页：第一行随机推荐 5 部电影（可换一批），下面挂媒体库表。"""
+    item_chosen = Signal(dict)
+    lib_chosen = Signal(dict)
+    # 后台线程算完库大小后，用信号回主线程刷 UI。
+    # （不能用 QTimer.singleShot：在工作线程里创建定时器，那个线程没有事件循环，回调永远不来）
+    counts_ready = Signal(object)
+
+    REC_N = 5
+    COLS = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.emby = None
+        self.tiles = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(30, 10, 30, 18)
+        root.setSpacing(0)
+
+        # ── 随机推荐 ──
+        h1 = QHBoxLayout()
+        h1.setSpacing(10)
+        t1 = QLabel("随机推荐")
+        t1.setObjectName("SecTitle")
+        self.btn_again = QPushButton("↻   换一批")
+        self.btn_again.setObjectName("Tool")
+        self.btn_again.setToolTip("重新随机抽 5 部电影")
+        self.btn_again.clicked.connect(lambda: self.load_recs())
+        h1.addWidget(t1)
+        h1.addStretch(1)
+        h1.addWidget(self.btn_again)
+        root.addLayout(h1)
+        root.addSpacing(10)
+
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        self.cards = []
+        for _ in range(self.REC_N):
+            c = PosterCard()
+            c.clicked.connect(self.item_chosen.emit)
+            row.addWidget(c)
+            self.cards.append(c)
+        row.addStretch(1)
+        root.addLayout(row)
+        root.addSpacing(20)
+
+        # ── 媒体库表 ──
+        h2 = QHBoxLayout()
+        t2 = QLabel("媒体库")
+        t2.setObjectName("SecTitle")
+        self.lbl_libs = QLabel("")
+        self.lbl_libs.setObjectName("Hint")
+        h2.addWidget(t2)
+        h2.addStretch(1)
+        h2.addWidget(self.lbl_libs)
+        root.addLayout(h2)
+        root.addSpacing(8)
+
+        self.lib_area = QScrollArea()
+        self.lib_area.setObjectName("LibArea2")
+        self.lib_area.setWidgetResizable(True)
+        self.lib_area.setFrameShape(QFrame.NoFrame)
+        self.lib_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        inner.setObjectName("LibInner2")
+        self.lib_grid = QGridLayout(inner)
+        # 右边留 14px：垂直滚动条是覆盖式画的，不留位卡片文字会被压在滚动条下面（看着像糊了）
+        self.lib_grid.setContentsMargins(0, 0, 14, 0)
+        self.lib_grid.setSpacing(10)
+        self.lib_area.setWidget(inner)
+        root.addWidget(self.lib_area, 1)
+        self.counts_ready.connect(self._apply_counts)
+
+    # ---- 媒体库表 ----
+    def fill_libs(self, views):
+        # 先 setParent(None) 立刻从界面摘掉，再 deleteLater 延迟回收。
+        # 只 deleteLater 的话旧卡片要等事件循环才消失，重填时会和新卡片叠在一起 → 文字重影（实测踩过）
+        while self.lib_grid.count():
+            it = self.lib_grid.takeAt(0)
+            w = it.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        self.tiles = {}
+        self.lbl_libs.setText("%d 个库" % len(views))
+        for i, v in enumerate(views):
+            tile = LibTile()
+            tile.set_view(v)
+            tile.clicked.connect(self.lib_chosen.emit)
+            self.lib_grid.addWidget(tile, i // self.COLS, i % self.COLS)
+            self.tiles[(v.get("Id"), v.get("_srv"))] = tile
+        rows = (len(views) + self.COLS - 1) // self.COLS
+        self.lib_grid.setRowStretch(rows, 1)     # 让剩下的高度留白，卡片顶上去
+        # 后台补「N 项」
+        if views:
+            _POOL.start(_CountTask(self.emby, list(views), self.counts_ready.emit))
+
+    def _apply_counts(self, pairs):
+        for iid, sid, n in pairs:
+            t = self.tiles.get((iid, sid))
+            if t is not None:
+                t.set_count(n)
+
+    # ---- 随机推荐 ----
+    def load_recs(self):
+        try:
+            items = self.emby.random_movies(self.REC_N)
+        except Exception:
+            items = []
+        for i, c in enumerate(self.cards):
+            if i < len(items):
+                it = items[i]
+                c.setVisible(True)
+                c.set_item(it, self.emby.image_url(
+                    it, "Primary", 400, (it.get("ImageTags") or {}).get("Primary")))
+            else:
+                c.setVisible(False)
+
+    def load(self, emby, views=None):
+        """进首页：填库表 + 抽推荐。"""
+        self.emby = emby
+        try:
+            vs = self.emby.views() if views is None else views
+        except Exception:
+            vs = []
+        self.fill_libs(vs)
+        self.load_recs()
+        # 拿第一部片的背景图当整页模糊底
+        for v in vs[:3]:
+            try:
+                items = self.emby.view_items(v, 6)
+            except Exception:
+                items = []
+            for it in items:
+                if it.get("BackdropImageTags"):
+                    fetch_async(self.emby.backdrop_url(it, 720),
+                                lambda im: self.set_backdrop_image(im, key="home"))
+                    return
+        self.clear_backdrop()
+
+
 # ═══════════════════════ 浏览页 ═══════════════════════
 class BrowsePage(GlassBackdrop):
     item_chosen = Signal(dict)
@@ -1219,6 +1480,9 @@ class MainWindow(QMainWindow):
         rv.addWidget(top)
 
         self.stack = QStackedWidget()
+        self.page_home = HomePage()
+        self.page_home.item_chosen.connect(self.open_item)
+        self.page_home.lib_chosen.connect(lambda v: self.show_lib(v, v.get("Name", "")))
         self.page_browse = BrowsePage()
         self.page_browse.item_chosen.connect(self.open_item)
         self.page_detail = DetailPage()
@@ -1235,8 +1499,8 @@ class MainWindow(QMainWindow):
         self.page_servers.edit_requested.connect(self.edit_server)
         self.page_servers.delete_requested.connect(self.delete_server)
 
-        for p in (self.page_welcome, self.page_servers, self.page_browse,
-                  self.page_detail, self.page_player):
+        for p in (self.page_welcome, self.page_servers, self.page_home,
+                  self.page_browse, self.page_detail, self.page_player):
             self.stack.addWidget(p)
         rv.addWidget(self.stack, 1)
         h.addWidget(right, 1)
@@ -1351,7 +1615,7 @@ class MainWindow(QMainWindow):
         self.refresh_server_label()
         if self.emby.clients:
             self.load_views()
-            self.show_lib(None, "首页")
+            self.show_home()
         else:
             self.rebuild_libs()
             self.show_welcome()
@@ -1359,13 +1623,13 @@ class MainWindow(QMainWindow):
     # ══════════ 媒体库列表 ══════════
     def load_views(self):
         if not self._nav_wired:
-            self.btn_home.clicked.connect(lambda: self.show_lib(None, "首页"))
+            self.btn_home.clicked.connect(self.show_home)
             self.btn_resume.clicked.connect(self.show_resume)
-            self.btn_search.clicked.connect(lambda: self.edit_search.setFocus())
+            self.btn_search.clicked.connect(self.show_search)
             self._nav_wired = True
         self.rebuild_libs()
         self.btn_home.setChecked(True)
-        self.show_lib(None, "首页")
+        self.show_home()
 
     def rebuild_libs(self):
         # 清掉旧的库按钮
@@ -1424,6 +1688,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("EasyHub")
 
     def show_lib(self, view, title):
+        if view is None:
+            self.show_home()
+            return
         self._show_browse()
         self.page_browse.clear_backdrop()
         self.lbl_page.setText(title or "首页")
@@ -1453,17 +1720,32 @@ class MainWindow(QMainWindow):
         except EmbyError as e:
             self.lbl_count.setText("加载失败: " + str(e))
 
-    def _load_home(self):
-        try:
-            items = self.emby.resume(18)
-            for it in items:
-                self._add(it, prefix="▶ ")
-            if items:
-                self.lbl_count.setText(f"继续观看 {len(items)} 项")
-                fetch_async(self.emby.backdrop_url(items[0], 720),
-                            lambda im: self.page_browse.set_backdrop_image(im, key="home"))
-        except EmbyError:
-            pass
+    def show_home(self):
+        """首页：随机推荐（5 部可换一批）+ 媒体库表。继续观看挪到侧栏那个按钮里。"""
+        if not self.emby.clients:
+            self.show_welcome()
+            return
+        self.stack.setCurrentWidget(self.page_home)
+        self.lbl_page.setText("首页")
+        self.lbl_count.setText("")
+        self.setWindowTitle("EasyHub")
+        b = self.btn_home
+        if not b.isChecked():
+            b.setChecked(True)
+        self.page_home.load(self.emby)
+
+    def show_search(self):
+        """点「搜索」要真的切页并聚焦输入框，不能看着没反应。"""
+        self._show_browse()
+        self.lbl_page.setText("搜索")
+        self._clear_grid()
+        term = self.edit_search.text().strip()
+        if term:
+            self.do_search()
+        else:
+            self.lbl_count.setText("在上面输入片名 / 剧名，回车搜索")
+        self.edit_search.setFocus()
+        self.edit_search.selectAll()
 
     def show_resume(self):
         self._show_browse()

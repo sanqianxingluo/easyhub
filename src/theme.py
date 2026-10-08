@@ -72,6 +72,17 @@ QPushButton#NavItem:checked {{
     font-weight: 600;
 }}
 
+#SecTitle {{ font-size: 15px; font-weight: 700; color: {TEXT}; padding: 4px 2px; }}
+#RecCard, #LibTile {{ background: transparent; }}
+#RecPic {{ background: rgba(255,255,255,0.05); border-radius: 12px;
+           border: 1px solid rgba(255,255,255,0.14); }}
+#RecName {{ color: {TEXT}; font-size: 12px; }}
+#LibTile {{ background: {GLASS_BG}; border: {GLASS_BORDER}; border-radius: 12px; }}
+#LibTile:hover {{ background: {GLASS_BG_HOVER}; border: {GLASS_BORDER_HI}; }}
+#LibName {{ font-size: 14px; font-weight: 600; }}
+#LibIcon {{ font-size: 19px; color: #9fc0ff; }}
+#LibArea, #LibArea2 {{ background: transparent; border: none; }}
+
 #TopBar {{ background: rgba(10,13,20,0.30);
            border-bottom: 1px solid rgba(255,255,255,0.08); }}
 #PageTitle {{ font-size: 20px; font-weight: 700; }}

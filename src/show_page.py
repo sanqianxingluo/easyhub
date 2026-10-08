@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """把窗口停在指定页面并保持显示，供宿主 screendump 抓真实画面。
-用法: python show_page.py lib|detail|player|servers
+用法: python show_page.py home|lib|detail|player|servers
 """
 import sys
 
@@ -16,7 +16,9 @@ def main():
     views = multi.views()
     mv = [v for v in views if v.get("CollectionType") == "movies"][0]
 
-    if page == "lib":
+    if page == "home":
+        w.show_home()
+    elif page == "lib":
         w.show_lib(mv, mv["Name"])
     elif page == "detail":
         w.show_lib(mv, mv["Name"])

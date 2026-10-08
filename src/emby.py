@@ -263,6 +263,15 @@ class Emby:
                        include_item_types="Episode", sort="IndexNumber")
         return d.get("Items", [])
 
+    def random_movies(self, limit=5):
+        """随机取电影（Emby 支持 SortBy=Random，服务端随机）。"""
+        q = {"Recursive": "true", "IncludeItemTypes": "Movie",
+             "Limit": limit, "SortBy": "Random", "SortOrder": "Ascending",
+             "Fields": "ProductionYear,RunTimeTicks,UserData,ImageTags",
+             "ImageTypeLimit": 1, "EnableImageTypes": "Primary"}
+        d = self._req("/Users/%s/Items?%s" % (self.user_id, urllib.parse.urlencode(q)))
+        return d.get("Items", []) or []
+
     def search(self, term, limit=60):
         q = {"SearchTerm": term, "Limit": limit, "Recursive": "true",
              "IncludeItemTypes": "Movie,Series,Episode",

@@ -3,6 +3,7 @@
 每个 item 上会挂 `_srv`（服务器 id），之后所有针对条目的调用都靠它路由回去，
 所以「从 A 服务器点的片」永远回到 A 服务器取流 / 报进度。
 """
+import random
 from emby import Emby, EmbyError
 from servers import tcp_ok
 
@@ -139,6 +140,28 @@ class MultiEmby:
 
     def resume(self, limit=48):
         return self._gather(lambda c, n: c.resume(n).get("Items", []), limit, _played)
+
+    def random_movies(self, limit=5):
+        """跨服务器随机推荐：每台各捞一批，混起来再随机挑 limit 部。"""
+        pool = []
+        for sid, cli in self.clients.items():
+            try:
+                pool.extend(self._tag(sid, cli.random_movies(max(limit, 8))))
+            except EmbyError:
+                continue
+        random.shuffle(pool)
+        return pool[:limit]
+
+    def view_count(self, view):
+        """某个库有多少项（Limit=1，只看 TotalRecordCount，开销很小）。"""
+        cli = self.clients.get(view.get("_srv"))
+        if cli is None:
+            return 0
+        try:
+            d = cli.items(view.get("Id"), 0, 1, True)
+        except EmbyError:
+            return 0
+        return d.get("TotalRecordCount") or 0
 
     def search(self, term, limit=90):
         return self._gather(lambda c, n: c.search(term, n).get("Items", []), limit)
