@@ -5,9 +5,9 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 ## 下载
 
-最新版本：**[v1.0.1](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.1)**
+最新版本：**[v1.0.2](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.2)**
 
-- `EasyHub-Setup-1.0.1.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
+- `EasyHub-Setup-1.0.2.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
 - `EasyHub-portable.exe`（89 MB）—— 便携单文件，双击即用，配置与程序同目录
 
 > 仓库私有，下载需登录本仓库的 GitHub 账号。
@@ -41,7 +41,10 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 - 剧集：季切换 + 分集列表（带观看状态）
 
 **播放**
-- 单击海报 → 详情页 → 播放，自动续播；进度实时回写 Emby（换设备接着看）
+- 单击海报 → 详情页 → 播放，自动续播
+- 控制条**悬浮在画面上**（显示/隐藏不改变画面大小），鼠标不动 3.6s 自动淡出
+- **点进度条任意位置直接跳转**（不是只有拖动才跳）；**左键点画面暂停**
+- 全屏（F / F11 / ⛶ / 双击画面）会收起侧栏与标题行，只剩画面；进度实时回写 Emby（换设备接着看）
 - **画质档位**：原画直连（默认，不转码）/ 40 / 20 / 10 / 6 / 3 Mbps —— 选限码率时走 Emby 的
   PlaybackInfo 协商，让服务端转一条 hls 流；**切换时保持当前进度**，不用重头看
 - **带宽实测与告警**：状态栏实时显示「码率 / 拉流速率 / 缓存秒数 / 实测硬解方式」；

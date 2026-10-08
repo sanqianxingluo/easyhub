@@ -9,7 +9,7 @@ import urllib.request
 # Emby 的 /Users/Me 会回 500「Unrecognized Guid format.」—— 实测踩过。
 DEVICE_ID = "7e3a9c21-5b44-4e8a-9f2d-1c6b7a0e4d33"
 CLIENT = ('MediaBrowser Client="EasyHub", Device="PC", '
-          'DeviceId="%s", Version="1.0.1"' % DEVICE_ID)
+          'DeviceId="%s", Version="1.0.2"' % DEVICE_ID)
 
 
 class EmbyError(Exception):
