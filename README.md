@@ -5,9 +5,9 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 ## 下载
 
-最新版本：**[v1.0.0](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.0)**
+最新版本：**[v1.0.1](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.1)**
 
-- `EasyHub-Setup-1.0.0.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
+- `EasyHub-Setup-1.0.1.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
 - `EasyHub-portable.exe`（89 MB）—— 便携单文件，双击即用，配置与程序同目录
 
 > 仓库私有，下载需登录本仓库的 GitHub 账号。
@@ -29,7 +29,9 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 - 首次打开是**空白引导页**，没有任何预置内容
 
 **浏览**
-- 媒体库海报墙、继续观看、搜索
+- **首页**：第一行是**随机推荐的 5 部电影**（右上角「换一批」重抽），下面挂**媒体库表** ——
+  每个库一格（名称 / 类型·来源 / 项数），点哪格进哪个库；「继续观看」在侧栏按钮里
+- 媒体库海报墙、继续观看、搜索（点搜索按钮直接切到搜索页并聚焦输入框）
 - 海报角标：`✔` 已看完、`▸48%` 看到一半
 
 **详情页**
@@ -61,7 +63,7 @@ EasyHub/
 ├─ library.py      多服务器聚合
 ├─ setup_ui.py     欢迎页 / 服务器列表 / 添加对话框
 ├─ paths.py        程序目录（兼容打包）
-├─ selftest.py / ui_flow.py                            自检脚本
+├─ selftest.py / ui_flow.py / check_home.py            自检脚本（界面 / 首页）
 ├─ libmpv-2.dll (115MB)                                解码内核，必须与程序同目录
 ├─ servers.json                                        服务器配置（在软件里改）
 └─ dist/EasyHub/   ← 打包好的成品：EasyHub.exe + 依赖
@@ -135,10 +137,10 @@ python ui_flow.py         # 遍历全部媒体库 + 详情页 + 播放 + 选集 
 - 上层面板用 `rgba(255,255,255,0.075)` + 1px 高光描边 + 大圆角 → 透出后面的模糊图
 - 没有背景图时用斜向渐变兜底
 
-### 4. 多服务器怎么合并
+### 4. 多服务器怎么路由（不合并）
 
 每个取回来的条目都挂一个 `_srv`（服务器 id），之后播放、报进度、取海报都靠它路由回原服务器，
-不会串台。同名库（名称+类型相同）自动合并，合并时按「片名+年份」去重。
+不会串台。**媒体库各管各的、不合并**：侧栏按服务器分组、每个库单独一项，点哪个库只出那台服务器的内容。
 
 ### 5. 直连不转码
 
