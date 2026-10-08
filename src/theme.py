@@ -136,11 +136,12 @@ QScrollBar:horizontal {{ background: transparent; height: 10px; }}
 QScrollBar::handle:horizontal {{ background: rgba(255,255,255,0.18);
     border-radius: 5px; min-width: 40px; }}
 
+/* 悬浮在画面上：原生子窗口不能半透明（子窗口没法 layered），
+   所以这里用「预先混好」的不透明色，观感仍是压暗的玻璃（顶部亮、底部近黑）。 */
 #CtrlBar {{
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                stop:0 rgba(12,15,22,0.30), stop:0.45 rgba(12,15,22,0.72),
-                stop:1 rgba(8,10,16,0.94));
-    border-top: 1px solid rgba(255,255,255,0.13);
+                stop:0 #2b3140, stop:0.45 #171b26, stop:1 #0a0c12);
+    border-top: 1px solid rgba(255,255,255,0.14);
 }}
 
 QSlider::groove:horizontal {{ height: 4px; background: rgba(255,255,255,0.20);

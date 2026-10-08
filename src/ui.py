@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QListWidgetItem, QLineEdit, QStackedWidget,
                                QSlider, QMenu, QFileDialog, QMessageBox,
                                QSizePolicy, QFrame, QListView, QButtonGroup,
-                               QScrollArea, QGridLayout, QComboBox, QSpacerItem, QDialog)
+                               QScrollArea, QGridLayout, QComboBox, QSpacerItem, QDialog,
+                               QStyle, QStyleOptionSlider)
 
 from theme import QSS
 from player import MpvPlayer, detect_adapters, list_adapters
@@ -914,6 +915,85 @@ class DetailPage(GlassBackdrop):
 
 
 # ═══════════════════════ 播放页 ═══════════════════════
+class _CtrlBar(QFrame):
+    """播放页底部控制条（悬浮层）。
+
+    为什么必须这么做（实测两条）：
+      ① 要浮在画面上就得是**独立原生窗口** —— mpv 用 wid 把视频渲染进 canvas 的原生窗口，
+         普通 Qt 控件会被画在视频「下面」，根本看不见；
+      ② 既然是原生子窗口，**半透明无效**（Windows 的子窗口不能 layered），
+         所以背景改用预先混好的不透明色（见 theme.py 的 #CtrlBar 注释）。
+    另外它把鼠标事件吃掉：否则点进度条周围的空白会冒泡到播放页，触发「点画面暂停」。
+    """
+
+    def mousePressEvent(self, e):
+        e.accept()
+
+    def mouseReleaseEvent(self, e):
+        e.accept()
+
+    def mouseDoubleClickEvent(self, e):
+        e.accept()
+
+
+class SeekSlider(QSlider):
+    """点进度条任意位置就直接跳过去。
+
+    默认 QSlider 是「翻页」语义（点一下只挪一个 page step），套上 QSS 皮肤后更看不出来，
+    所以这里自己换算点击位置 → 数值。拖拽照旧：按下即跳、拖动 scrub、松开才 seek。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self._scrub = False
+
+    def _value_at(self, x):
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        st = self.style()
+        gro = st.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
+        hnd = st.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+        span = gro.width() - hnd.width()
+        if span <= 0:                      # 皮肤没给出可用几何时退化成按宽度比例
+            span = max(1, self.width() - 1)
+            pos = int(x)
+        else:
+            pos = int(x - gro.x() - hnd.width() / 2.0)
+        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), pos, span)
+
+    def _jump(self, x, pressed=False):
+        v = self._value_at(x)
+        if pressed:
+            self.sliderPressed.emit()
+        if v != self.value():
+            self.setValue(v)
+        self.sliderMoved.emit(self.value())
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.maximum() > self.minimum():
+            self._scrub = True
+            self._jump(e.position().x(), pressed=True)
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._scrub:
+            self._jump(e.position().x())
+            e.accept()
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if self._scrub:
+            self._scrub = False
+            self._jump(e.position().x())
+            self.sliderReleased.emit()
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
+
+
 class PlayerPage(QWidget):
     back_requested = Signal()
 
@@ -946,7 +1026,7 @@ class PlayerPage(QWidget):
         self.player = MpvPlayer(self.canvas, adapter=adapter)
 
         # ── 烟熏玻璃控制条 ──
-        self.bar = QFrame()
+        self.bar = _CtrlBar()
         self.bar.setObjectName("CtrlBar")
         self.bar.setFixedHeight(122)
         bl = QVBoxLayout(self.bar)
@@ -971,7 +1051,7 @@ class PlayerPage(QWidget):
         self.lbl_pos.setObjectName("TimeLabel")
         self.lbl_pos.setFixedWidth(56)
         self.lbl_pos.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = SeekSlider()
         self.slider.setRange(0, 1000)
         self.lbl_dur = QLabel("00:00")
         self.lbl_dur.setObjectName("TimeLabel")
@@ -1009,7 +1089,12 @@ class PlayerPage(QWidget):
         row2.addWidget(self.lbl_title, 1)
         bl.addLayout(row2)
 
-        v.addWidget(self.bar)
+        # 控制条「浮」在画面上、不进布局：这样显示/隐藏都不会改变视频区域大小。
+        # 必须原生窗口 —— mpv 把视频渲染进 canvas 的原生窗口，普通控件会被它盖住。
+        self.bar.setParent(self)
+        self.bar.setAttribute(Qt.WA_NativeWindow)
+        self._place_bar()
+        self.bar.raise_()
 
         # 播放时鼠标不动就淡出控制条
         self.hide_timer = QTimer(self)
@@ -1065,12 +1150,28 @@ class PlayerPage(QWidget):
         self.bar.setVisible(False)
         self.setCursor(Qt.BlankCursor)
 
+    def _place_bar(self):
+        """把控制条贴在页面底部（悬浮，不占布局）。"""
+        h = self.bar.height()
+        self.bar.setGeometry(0, max(0, self.height() - h), self.width(), h)
+        self.bar.raise_()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place_bar()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._place_bar()
+
     def mouseMoveEvent(self, e):
         self.poke()
         super().mouseMoveEvent(e)
 
     def mousePressEvent(self, e):
-        self.player.toggle_pause()
+        # 只有点画面（canvas）才暂停：控制条会吃掉自己的点击，不会冒泡到这里
+        if e.button() == Qt.LeftButton:
+            self.player.toggle_pause()
         self.poke()
         super().mousePressEvent(e)
 
@@ -1388,6 +1489,7 @@ class MainWindow(QMainWindow):
         # ── 玻璃侧栏 ──
         side = QWidget()
         side.setObjectName("Sidebar")
+        self.side = side              # 全屏时要收起来
         side.setFixedWidth(216)
         sv = QVBoxLayout(side)
         sv.setContentsMargins(0, 0, 0, 12)
@@ -1463,6 +1565,7 @@ class MainWindow(QMainWindow):
 
         top = QWidget()
         top.setObjectName("TopBar")
+        self.top = top                # 全屏时一起收起来
         tl = QHBoxLayout(top)
         tl.setContentsMargins(20, 13, 20, 11)
         self.lbl_page = QLabel("首页")
@@ -1830,16 +1933,40 @@ class MainWindow(QMainWindow):
             self.page_player.player.toggle_pause()
             self.page_player.poke()
 
+    def _sync_chrome(self, full=None):
+        """全屏时收起侧栏与顶部标题行（全屏播放就该只剩画面）。
+
+        ⚠ 必须由调用方把目标状态传进来：`showFullScreen()` 是**异步**的，
+        调用后立刻 `isFullScreen()` 还是 False（实测踩过，等于没收起）。
+        """
+        if full is None:
+            full = self.isFullScreen()
+        self.side.setVisible(not full)
+        self.top.setVisible(not full)
+
     def toggle_fullscreen(self):
-        if self.isFullScreen():
-            self.showNormal()
-        else:
+        go_full = not self.isFullScreen()
+        if go_full:
             self.showFullScreen()
+        else:
+            self.showNormal()
+        self._sync_chrome(go_full)
         self.page_player.poke()
+
+    def changeEvent(self, e):
+        """窗口状态一变就同步外壳。
+
+        `showFullScreen()` 是异步的，而且外部（或系统）也可能直接改状态 ——
+        在这里读 `isFullScreen()` 是准的，等于给「全屏收侧栏」上一道保险。
+        """
+        super().changeEvent(e)
+        if e.type() == QEvent.WindowStateChange:
+            self._sync_chrome(self.isFullScreen())
 
     def esc_key(self):
         if self.isFullScreen():
             self.showNormal()
+            self._sync_chrome(False)
         elif self.stack.currentWidget() is self.page_player:
             self.close_player()
         elif self.stack.currentWidget() is self.page_detail:
