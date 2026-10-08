@@ -35,6 +35,7 @@ from emby import Emby, EmbyError
 from library import MultiEmby
 from paths import cache_dir
 from setup_ui import WelcomePage, ServerPage, ServerDialog
+from version import APP_VERSION
 
 CACHE_DIR = cache_dir()
 
@@ -211,6 +212,43 @@ def chip(text):
 
 
 # ═══════════════════════ 海报墙 ═══════════════════════
+# ═══════════════════════ 显示名：剧集一律显示剧名 ═══════════════════════
+# 集名（如「第 12 集」）单独看完全不知道是什么剧，列表里一律用**剧名**当标题，
+# 集数（S01E05）与集名放进第二行 / 悬停提示。
+def item_title(it):
+    if it.get("Type") == "Episode":
+        return it.get("SeriesName") or it.get("Name") or "?"
+    return it.get("Name") or "?"
+
+
+def item_episode_code(it):
+    """剧集的 S01E05；非剧集返回空串。"""
+    if it.get("Type") != "Episode":
+        return ""
+    pn, n = it.get("ParentIndexNumber"), it.get("IndexNumber")
+    if pn is None or n is None:
+        return ""
+    try:
+        return "S%02dE%02d" % (int(pn), int(n))
+    except (TypeError, ValueError):
+        return ""
+
+
+def item_tooltip(it):
+    """悬停说明：剧集 = 剧名 S01E05 · 集名；电影 = 片名（年份）。"""
+    if it.get("Type") == "Episode":
+        bits = [it.get("SeriesName") or ""]
+        c = item_episode_code(it)
+        if c:
+            bits.append(c)
+        nm = it.get("Name") or ""
+        if nm and nm != (it.get("SeriesName") or ""):
+            bits.append(nm)
+        return "  ·  ".join(b for b in bits if b)
+    y = it.get("ProductionYear")
+    return "%s%s" % (it.get("Name") or "", ("  (%s)" % y) if y else "")
+
+
 class PosterGrid(QListWidget):
     activated_item = Signal(dict)
 
@@ -254,16 +292,17 @@ class PosterGrid(QListWidget):
             rt = data.get("RunTimeTicks") or 0
             if pt and rt:
                 badge = "  ▸%d%%" % int(pt * 100 / rt)
-        title = data.get("Name", "?")
+        title = item_title(data)
         if len(title) > 26:
             title = title[:25] + "…"
-        line2 = "%s%s" % (yr, badge)
+        # 剧集第二行显示 S01E05（年份对剧集没意义），电影显示年份
+        line2 = "%s%s" % (item_episode_code(data) or yr, badge)
         srv = data.get("_srvname") or ""
         if srv:
             line2 += "  ·  " + (srv[:8] + "…" if len(srv) > 9 else srv)
         it.setText("%s\n%s" % (title, line2))
         it.setData(Qt.UserRole, data)
-        it.setToolTip(data.get("Name", ""))
+        it.setToolTip(item_tooltip(data))
         it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
         it.setSizeHint(QSize(POSTER_W + 22, POSTER_H + 62))
         ph = QPixmap(POSTER_W, POSTER_H)
@@ -318,9 +357,9 @@ class PosterCard(QFrame):
 
     def set_item(self, it, url):
         self.data = it
-        t = it.get("Name", "")
+        t = item_title(it)
         self.name.setText(t if len(t) <= 12 else t[:11] + "…")
-        self.name.setToolTip("%s%s" % (t, ("  (%s)" % it["ProductionYear"]) if it.get("ProductionYear") else ""))
+        self.name.setToolTip(item_tooltip(it))
         fetch_async(url, self._got)
 
     def _got(self, img):
@@ -918,13 +957,38 @@ class DetailPage(GlassBackdrop):
 class _CtrlBar(QFrame):
     """播放页底部控制条（悬浮层）。
 
-    为什么必须这么做（实测两条）：
+    为什么必须这么做（实测）：
       ① 要浮在画面上就得是**独立原生窗口** —— mpv 用 wid 把视频渲染进 canvas 的原生窗口，
          普通 Qt 控件会被画在视频「下面」，根本看不见；
-      ② 既然是原生子窗口，**半透明无效**（Windows 的子窗口不能 layered），
-         所以背景改用预先混好的不透明色（见 theme.py 的 #CtrlBar 注释）。
+      ② 半透明**不能走 Qt** —— setWindowOpacity 只对顶层窗口生效，而这里是原生子窗口，
+         得自己给 HWND 加 WS_EX_LAYERED + SetLayeredWindowAttributes。
+         Windows 8 起子窗口才支持 layered，且只支持「统一 alpha」（没有逐像素透明，
+         所以做不出真毛玻璃）。好处是画面上的字幕能透过控制条看见（用户反馈过被挡）。
     另外它把鼠标事件吃掉：否则点进度条周围的空白会冒泡到播放页，触发「点画面暂停」。
     """
+
+    # 控制条整体不透明度（0~1）：太低控件看不清，太高挡字幕。0.62 是折中值。
+    ALPHA = 0.62
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._apply_translucency()
+
+    def _apply_translucency(self):
+        """给原生子窗口挂统一 alpha。每次显示都重设一遍——Qt 可能在隐藏/显示时
+        重建原生窗口，样式会跟着丢。"""
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            GWL_EXSTYLE, WS_EX_LAYERED, LWA_ALPHA = -20, 0x00080000, 0x2
+            ex = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            u32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
+            u32.SetLayeredWindowAttributes(hwnd, 0, int(255 * self.ALPHA), LWA_ALPHA)
+        except Exception:
+            pass
 
     def mousePressEvent(self, e):
         e.accept()
@@ -1468,7 +1532,7 @@ class MainWindow(QMainWindow):
         self.store = store
         self.emby = emby
         self._nav_wired = False
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
         self.resize(1360, 840)
         self.setMinimumSize(980, 640)
 
@@ -1675,14 +1739,14 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.page_welcome)
         self.lbl_page.setText("欢迎")
         self.lbl_count.setText("")
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
     def show_servers(self):
         self.page_servers.render(self.store, self.emby)
         self.stack.setCurrentWidget(self.page_servers)
         self.lbl_page.setText("服务器")
         self.lbl_count.setText("")
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
     def add_server(self):
         dlg = ServerDialog(None, self)
@@ -1788,7 +1852,7 @@ class MainWindow(QMainWindow):
 
     def _show_browse(self):
         self.stack.setCurrentWidget(self.page_browse)
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
     def show_lib(self, view, title):
         if view is None:
@@ -1831,7 +1895,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.page_home)
         self.lbl_page.setText("首页")
         self.lbl_count.setText("")
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
         b = self.btn_home
         if not b.isChecked():
             b.setChecked(True)
@@ -1883,7 +1947,7 @@ class MainWindow(QMainWindow):
         t = item.get("Type")
         if t in ("Folder", "BoxSet", "Season"):
             # 文件夹/季：直接列出内容
-            self.lbl_page.setText(item.get("Name", ""))
+            self.lbl_page.setText(item_title(item))
             self._show_browse()
             self._clear_grid()
             try:
@@ -1899,13 +1963,13 @@ class MainWindow(QMainWindow):
         saved = getattr(self, "_saved_page", None)
         if saved is None:
             self._saved_page = self.lbl_page.text()
-        self.lbl_page.setText(item.get("Name", ""))
+        self.lbl_page.setText(item_title(item))
         self.lbl_count.setText("")
-        self.setWindowTitle("EasyHub - " + item.get("Name", ""))
+        self.setWindowTitle("EasyHub %s - %s" % (APP_VERSION, item_title(item)))
 
     def close_detail(self):
         self.stack.setCurrentWidget(self.page_browse)
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
         b = self.nav_group.checkedButton()
         if b and b is not self.btn_home:
             b.click()
@@ -1914,7 +1978,7 @@ class MainWindow(QMainWindow):
     def play(self, item, start_ticks=0):
         self.stack.setCurrentWidget(self.page_player)
         self.page_player.play_item(self.emby, item, start_ticks)
-        self.setWindowTitle("EasyHub - " + item.get("Name", ""))
+        self.setWindowTitle("EasyHub %s - %s" % (APP_VERSION, item_title(item)))
 
     def close_player(self):
         self.page_player.leave()
@@ -1923,7 +1987,7 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.page_detail)
         else:
             self.stack.setCurrentWidget(self.page_browse)
-        self.setWindowTitle("EasyHub")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
         b = self.nav_group.checkedButton()
         if b and b is not self.btn_home:
             b.click()

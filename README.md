@@ -5,10 +5,12 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 ## 下载
 
-最新版本：**[v1.0.2](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.2)**
+最新版本：**[v1.0.3](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.0.3)**
 
-- `EasyHub-Setup-1.0.2.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
-- `EasyHub-portable.exe`（89 MB）—— 便携单文件，双击即用，配置与程序同目录
+- `EasyHub-Setup-1.0.3.exe`（64 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
+- `EasyHub-Portable-1.0.3.exe`（89 MB）—— 便携单文件，双击即用，配置与程序同目录
+
+**两个文件名都带版本号**，下载后一眼能看出是哪一版（窗口标题里也写着版本）。
 
 > 仓库私有，下载需登录本仓库的 GitHub 账号。
 
@@ -42,7 +44,9 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 **播放**
 - 单击海报 → 详情页 → 播放，自动续播
-- 控制条**悬浮在画面上**（显示/隐藏不改变画面大小），鼠标不动 3.6s 自动淡出
+- 列表里**剧集显示剧名**（不是集名，集名看不懂）；集数 S01E05 放在第二行，悬停能看到完整信息
+- 控制条**悬浮在画面上**，且是**半透明**的 —— 底下的画面和字幕能透出来（不会挡住字幕）
+- 控制条显示/隐藏**不改变画面大小**，鼠标不动 3.6s 自动隐藏
 - **点进度条任意位置直接跳转**（不是只有拖动才跳）；**左键点画面暂停**
 - 全屏（F / F11 / ⛶ / 双击画面）会收起侧栏与标题行，只剩画面；进度实时回写 Emby（换设备接着看）
 - **画质档位**：原画直连（默认，不转码）/ 40 / 20 / 10 / 6 / 3 Mbps —— 选限码率时走 Emby 的

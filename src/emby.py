@@ -5,11 +5,13 @@ import time
 import urllib.parse
 import urllib.request
 
+from version import APP_VERSION
+
 # 注意：DeviceId 必须是 GUID 格式。用普通字符串（如 "hermes-pc-player"）时，
 # Emby 的 /Users/Me 会回 500「Unrecognized Guid format.」—— 实测踩过。
 DEVICE_ID = "7e3a9c21-5b44-4e8a-9f2d-1c6b7a0e4d33"
 CLIENT = ('MediaBrowser Client="EasyHub", Device="PC", '
-          'DeviceId="%s", Version="1.0.2"' % DEVICE_ID)
+          'DeviceId="%s", Version="%s"' % (DEVICE_ID, APP_VERSION))
 
 
 class EmbyError(Exception):
@@ -104,7 +106,8 @@ class Emby:
             "ParentId": parent_id, "StartIndex": start, "Limit": limit,
             "Recursive": "true" if recursive else "false",
             "SortBy": sort, "SortOrder": "Ascending",
-            "Fields": fields or "ProductionYear,RunTimeTicks,UserData,MediaSources,ImageTags",
+            "Fields": fields or ("ProductionYear,RunTimeTicks,UserData,MediaSources,ImageTags,"
+                                  "SeriesName,SeriesId,IndexNumber,ParentIndexNumber"),
             "ImageTypeLimit": 1, "EnableImageTypes": "Primary",
         }
         if include_item_types:
@@ -115,7 +118,9 @@ class Emby:
 
     def resume(self, limit=24):
         q = {"Limit": limit, "MediaTypes": "Video",
-             "Fields": "ProductionYear,RunTimeTicks,UserData,ImageTags",
+             # ★ 继续观看可能是剧集，必须带 SeriesName/IndexNumber，否则界面只能显示集名
+             "Fields": ("ProductionYear,RunTimeTicks,UserData,ImageTags,"
+                        "SeriesName,SeriesId,IndexNumber,ParentIndexNumber"),
              "ImageTypeLimit": 1, "EnableImageTypes": "Primary"}
         return self._req("/Users/%s/Items/Resume?%s" % (self.user_id, urllib.parse.urlencode(q)))
 
