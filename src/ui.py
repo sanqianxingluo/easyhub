@@ -29,12 +29,13 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QScrollArea, QGridLayout, QComboBox, QSpacerItem, QDialog,
                                QStyle, QStyleOptionSlider)
 
-from theme import QSS
+import theme
 from player import MpvPlayer, detect_adapters, list_adapters
 from emby import Emby, EmbyError
 from library import MultiEmby
 from paths import cache_dir
 from setup_ui import WelcomePage, ServerPage, ServerDialog
+from settings_ui import AppearancePage
 from version import APP_VERSION
 
 CACHE_DIR = cache_dir()
@@ -168,9 +169,10 @@ class GlassBackdrop(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         r = self.rect()
+        c = theme.current()          # 换配色后这里拿到的就是新颜色
 
         # 底色（透明处兜底）
-        p.fillRect(r, QColor("#0b0e14"))
+        p.fillRect(r, QColor(c["base"]))
 
         if self._blur is not None:
             sc = self._blur.scaled(r.size(), Qt.KeepAspectRatioByExpanding,
@@ -181,9 +183,9 @@ class GlassBackdrop(QWidget):
         else:
             # 没有背景图时用斜向渐变，一样有质感
             g = QLinearGradient(0, 0, r.width() * 0.9, r.height())
-            g.setColorAt(0.0, QColor("#141b2c"))
-            g.setColorAt(0.5, QColor("#171430"))
-            g.setColorAt(1.0, QColor("#0a0c12"))
+            g.setColorAt(0.0, QColor(c["bg1"]))
+            g.setColorAt(0.5, QColor(c["bg2"]))
+            g.setColorAt(1.0, QColor(c["bg3"]))
             p.fillRect(r, g)
 
         # 暗色 + 上下渐变，让文字与玻璃面板浮起来
@@ -1612,6 +1614,9 @@ class MainWindow(QMainWindow):
         self.btn_servers = self._nav("⚙   服务器")
         self.btn_servers.clicked.connect(self.show_servers)
         sv.addWidget(self.btn_servers)
+        self.btn_appearance = self._nav("◑   外观")
+        self.btn_appearance.clicked.connect(self.show_appearance)
+        sv.addWidget(self.btn_appearance)
 
         self.lbl_server = QLabel("")
         self.lbl_server.setObjectName("Hint")
@@ -1665,9 +1670,12 @@ class MainWindow(QMainWindow):
         self.page_servers.add_requested.connect(self.add_server)
         self.page_servers.edit_requested.connect(self.edit_server)
         self.page_servers.delete_requested.connect(self.delete_server)
+        self.page_appearance = AppearancePage(theme.current())
+        self.page_appearance.theme_changed.connect(self.apply_theme)
 
-        for p in (self.page_welcome, self.page_servers, self.page_home,
-                  self.page_browse, self.page_detail, self.page_player):
+        for p in (self.page_welcome, self.page_servers, self.page_appearance,
+                  self.page_home, self.page_browse, self.page_detail,
+                  self.page_player):
             self.stack.addWidget(p)
         rv.addWidget(self.stack, 1)
         h.addWidget(right, 1)
@@ -1747,6 +1755,33 @@ class MainWindow(QMainWindow):
         self.lbl_page.setText("服务器")
         self.lbl_count.setText("")
         self.setWindowTitle("EasyHub %s" % APP_VERSION)
+
+    def show_appearance(self):
+        self.page_appearance.sync(theme.current())
+        self.stack.setCurrentWidget(self.page_appearance)
+        self.lbl_page.setText("外观")
+        self.lbl_count.setText("")
+        self.setWindowTitle("EasyHub %s" % APP_VERSION)
+
+    def apply_theme(self, palette):
+        """换配色：重设全局 QSS、落盘、把所有自绘背景的页面重画一遍。
+
+        页面背景（模糊图 + 斜向渐变）是 paintEvent 现画的，所以换个配色
+        再 update() 就整体跟着变，不需要重建任何控件、也不丢当前页面状态。
+        """
+        theme.set_current(palette)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.build_qss())
+        # 只存种子（预设名 or 两个强调色），派生色不落盘
+        self.store.set_pref("theme", theme.dumps(theme.current()))
+        try:
+            self.page_appearance.sync(theme.current())
+        except Exception:
+            pass
+        for p in (self.page_welcome, self.page_servers, self.page_appearance,
+                  self.page_home, self.page_browse, self.page_detail):
+            p.update()
 
     def add_server(self):
         dlg = ServerDialog(None, self)

@@ -111,14 +111,18 @@ def main():
     except Exception:
         pass
 
-    from theme import QSS
-    app.setStyleSheet(QSS)
+    import theme
 
     from servers import ServerStore
     from library import MultiEmby
 
     # 服务器配置（servers.json）。没有任何服务器时软件就是空白引导页，不是报错。
     store = ServerStore()
+
+    # 配色存在 prefs.theme（设置页「外观」写进去），没有就用默认配色
+    theme.set_current(store.get_pref("theme") or theme.DEFAULT)
+    app.setStyleSheet(theme.build_qss())
+
     multi = MultiEmby(store.enabled())
     try:
         multi.connect_all()
