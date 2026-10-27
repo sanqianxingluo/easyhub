@@ -18,6 +18,12 @@ class EmbyError(Exception):
     pass
 
 
+# 海报墙真正要用到的字段。别小看这一行：默认 Fields 里的 MediaSources
+# 一条就 6.7 KB，500 项 = 3.34 MB；换成这个 = 0.28 MB（实测，同一个库）。
+GRID_FIELDS = ("ProductionYear,RunTimeTicks,UserData,ImageTags,BackdropImageTags,"
+               "SeriesName,SeriesId,IndexNumber,ParentIndexNumber")
+
+
 class Emby:
     def __init__(self, server, username=None, password=None, token=None):
         self.server = server.rstrip("/")
@@ -106,8 +112,7 @@ class Emby:
             "ParentId": parent_id, "StartIndex": start, "Limit": limit,
             "Recursive": "true" if recursive else "false",
             "SortBy": sort, "SortOrder": "Ascending",
-            "Fields": fields or ("ProductionYear,RunTimeTicks,UserData,MediaSources,ImageTags,"
-                                  "SeriesName,SeriesId,IndexNumber,ParentIndexNumber"),
+            "Fields": fields or GRID_FIELDS,
             "ImageTypeLimit": 1, "EnableImageTypes": "Primary",
         }
         if include_item_types:
@@ -115,6 +120,18 @@ class Emby:
         if filters:
             q.update(filters)
         return self._req("/Users/%s/Items?%s" % (self.user_id, urllib.parse.urlencode(q)))
+
+    def channels(self, start=0, limit=1000):
+        """直播频道：/LiveTv/Channels。
+
+        LiveTV 库**绝不能**走 /Users/{id}/Items?ParentId=<直播库>&Recursive=true：
+        实测那样会退化成"整个服务器递归"，返回的是一堆剧集/电影（1820 项里
+        327 集 + 91 季 + 35 个文件夹），跟频道毫无关系。频道只认这个接口。
+        """
+        q = {"UserId": self.user_id, "StartIndex": start, "Limit": limit,
+             "EnableImages": "true", "EnableImageTypes": "Primary",
+             "Fields": "ImageTags,UserData"}
+        return self._req("/LiveTv/Channels?%s" % urllib.parse.urlencode(q))
 
     def resume(self, limit=24):
         q = {"Limit": limit, "MediaTypes": "Video",

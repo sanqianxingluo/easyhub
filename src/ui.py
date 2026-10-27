@@ -98,7 +98,10 @@ class _Fetch(QRunnable):
                 return
         img = QImage()
         img.loadFromData(data)
-        _SIG.fetched.emit(self.url, img)
+        try:
+            _SIG.fetched.emit(self.url, img)
+        except RuntimeError:
+            pass       # 窗口/信号已经销毁（退出时线程还在跑），别刷一堆堆栈
 
 
 def fetch_async(url, cb):
@@ -118,6 +121,9 @@ def fetch_async(url, cb):
 def _keep(url, img):
     if not img.isNull():
         _MEM[url] = img
+        # 逛多个库时会累积到几百张（176×264×4B ≈ 190 KB/张），给个上限防 RSS 一直涨
+        while len(_MEM) > 800:
+            _MEM.pop(next(iter(_MEM)))
 
 
 _SIG.fetched.connect(_keep)
@@ -280,6 +286,11 @@ def item_tooltip(it):
 
 class PosterGrid(QListWidget):
     activated_item = Signal(dict)
+    need_more = Signal()          # 快滚到底了，还要不要下一批
+
+    # 占位图标全网格共用一张 4×4 的小 pixmap（放大成深色块）。
+    # 别每张卡都 new 一个 176×264 的：946 张就是 180 MB，切库时光释放就 500 ms。
+    _PH_ICON = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -296,6 +307,12 @@ class PosterGrid(QListWidget):
         self.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._items = {}
+        self._urls = {}             # key -> url（取图在滚动时按需触发）
+        self._pending = []          # [(key, url)] 还没取图的条目
+        self._pump = QTimer(self)
+        self._pump.setInterval(16)
+        self._pump.timeout.connect(self._pump_images)
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.itemDoubleClicked.connect(self._emit)
         self.itemActivated.connect(self._emit)
         self.itemClicked.connect(self._emit)   # 单击进详情页
@@ -305,9 +322,58 @@ class PosterGrid(QListWidget):
         if d:
             self.activated_item.emit(d)
 
+    @classmethod
+    def placeholder_icon(cls):
+        if cls._PH_ICON is None:
+            pm = QPixmap(4, 4)
+            pm.fill(QColor("#1b2130"))
+            cls._PH_ICON = QIcon(pm)
+        return cls._PH_ICON
+
     def clear_all(self):
-        self.clear()
+        self._pump.stop()
+        self._pending.clear()
         self._items.clear()
+        self._urls.clear()
+        self.clear()
+
+    def _on_scroll(self, value):
+        self.fill_visible()
+        bar = self.verticalScrollBar()
+        if bar.maximum() > 0 and value >= bar.maximum() - 400:
+            self.need_more.emit()
+
+    def fill_visible(self, margin=260):
+        """只给「看得见（上下各多留 margin）」的条目排队取图。
+
+        之前是建卡就取图：946 个频道 = 946 次请求 + 946 次解码，全都压在主线程上。
+        现在滚动到哪取到哪，首屏之外几乎不花时间。
+        """
+        rect = self.viewport().rect().adjusted(0, -margin, 0, margin)
+        # 必须取快照：visualItemRect() 会触发布局，布局里可能回调 need_more → 追加新卡
+        # 而追加会往 _items 里塞 key，直接遍历原字典就是 "dictionary changed size during iteration"
+        for key, it in list(self._items.items()):
+            url = self._urls.get(key)
+            if not url:
+                continue                      # 已取过图 / 已排队
+            r = self.visualItemRect(it)
+            if r.isValid() and rect.intersects(r):
+                self._queue_image(key, url)
+
+    def _queue_image(self, key, url):
+        # 已经排过队的别再排（滚动会反复触发）
+        self._urls.pop(key, None)
+        self._pending.append((key, url))
+        if not self._pump.isActive():
+            self._pump.start()
+
+    def _pump_images(self):
+        for _ in range(16):
+            if not self._pending:
+                self._pump.stop()
+                return
+            key, url = self._pending.pop(0)
+            fetch_async(url, lambda img, k=key: self._poster(k, img))
 
     def add_entry(self, data, key, url):
         it = QListWidgetItem()
@@ -324,8 +390,14 @@ class PosterGrid(QListWidget):
         title = item_title(data)
         if len(title) > 26:
             title = title[:25] + "…"
-        # 剧集第二行显示 S01E05（年份对剧集没意义），电影显示年份
-        line2 = "%s%s" % (item_episode_code(data) or yr, badge)
+        # 剧集第二行显示 S01E05（年份对剧集没意义），电影显示年份，
+        # 电视频道显示频道号（年份/集数都没有）
+        if data.get("Type") == "TvChannel":
+            num = data.get("ChannelNumber") or data.get("IndexNumber") or data.get("Number")
+            line2 = ("CH %s" % num) if num else ""
+        else:
+            line2 = item_episode_code(data) or str(yr)
+        line2 = "%s%s" % (line2, badge)
         srv = data.get("_srvname") or ""
         if srv:
             line2 += "  ·  " + (srv[:8] + "…" if len(srv) > 9 else srv)
@@ -334,16 +406,27 @@ class PosterGrid(QListWidget):
         it.setToolTip(item_tooltip(data))
         it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
         it.setSizeHint(QSize(POSTER_W + 22, POSTER_H + 62))
-        ph = QPixmap(POSTER_W, POSTER_H)
-        ph.fill(QColor("#1b2130"))
-        it.setIcon(QIcon(round_pixmap(ph)))
+        it.setIcon(self.placeholder_icon())
         self.addItem(it)
         self._items[key] = it
-        fetch_async(url, lambda img, k=key: self._poster(k, img))
+        self._urls[key] = url
 
     def _poster(self, key, img):
         it = self._items.get(key)
         if it is None or img.isNull():
+            return
+        data = it.data(Qt.UserRole) or {}
+        if data.get("Type") == "TvChannel":
+            # 频道台标是宽图，套进 2:3 的竖海报再裁边会把台名切掉 —— 改成等比缩放居中
+            pm = QPixmap.fromImage(img).scaled(POSTER_W, POSTER_H,
+                                              Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+            out = QPixmap(POSTER_W, POSTER_H)
+            out.fill(QColor("#1b2130"))
+            p = QPainter(out)
+            p.drawPixmap((POSTER_W - pm.width()) // 2, (POSTER_H - pm.height()) // 2, pm)
+            p.end()
+            it.setIcon(QIcon(round_pixmap(out)))
             return
         pm = QPixmap.fromImage(img).scaled(POSTER_W, POSTER_H,
                                           Qt.KeepAspectRatioByExpanding,
@@ -486,7 +569,10 @@ class _CountTask(QRunnable):
     def run(self):
         out = []
         for v in self.views:
-            out.append((v.get("Id"), v.get("_srv"), self.emby.view_count(v)))
+            # 直播库的"多少项"要看频道数：/Items 递归查对 livetv 是无效的（见 emby.channels）
+            n = (self.emby.channel_count(v) if v.get("CollectionType") == "livetv"
+                 else self.emby.view_count(v))
+            out.append((v.get("Id"), v.get("_srv"), n))
         try:
             self.cb(out)
         except RuntimeError:
@@ -1663,8 +1749,9 @@ class MainWindow(QMainWindow):
 
         self.btn_home = self._nav("首页")
         self.btn_resume = self._nav("继续观看")
-        self.btn_search = self._nav("搜索")
-        for b in (self.btn_home, self.btn_resume, self.btn_search):
+        # 搜索不再单独占一行：右上角那个输入框在任何页面都在，回车即搜（Ctrl+F 聚焦）。
+        # 侧栏因此只留「首页 / 继续观看」两个入口，窄窗口也能整列放下。
+        for b in (self.btn_home, self.btn_resume):
             sv.addWidget(b)
 
         t2 = QLabel("分类")
@@ -1737,13 +1824,22 @@ class MainWindow(QMainWindow):
         self.lbl_page.setObjectName("PageTitle")
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("Hint")
+        # 刷新：丢掉本地列表缓存重拉当前页（列表有 15 分钟 TTL，刚加完片时用得上）
+        self.btn_reload = QPushButton("⟳")
+        self.btn_reload.setObjectName("IconBtn")
+        self.btn_reload.setToolTip("刷新当前页（Ctrl+R）—— 忽略本地缓存，重新向服务器要一遍")
+        self.btn_reload.setFixedSize(32, 32)
+        self.btn_reload.setCursor(Qt.PointingHandCursor)
+        self.btn_reload.clicked.connect(lambda: self.reload_page())
         self.edit_search = QLineEdit()
-        self.edit_search.setPlaceholderText("搜索影片 / 剧集…")
+        self.edit_search.setPlaceholderText("搜索影片 / 剧集…（回车）")
         self.edit_search.setFixedWidth(280)
         self.edit_search.returnPressed.connect(self.do_search)
         tl.addWidget(self.lbl_page)
         tl.addSpacing(16)
         tl.addWidget(self.lbl_count, 1)
+        tl.addWidget(self.btn_reload)
+        tl.addSpacing(theme.SP2)
         tl.addWidget(self.edit_search)
         rv.addWidget(top)
 
@@ -1753,6 +1849,7 @@ class MainWindow(QMainWindow):
         self.page_home.lib_chosen.connect(lambda v: self.show_lib(v, v.get("Name", "")))
         self.page_browse = BrowsePage()
         self.page_browse.item_chosen.connect(self.open_item)
+        self.page_browse.grid.need_more.connect(self._append_page)   # 滚到底追加下一批
         self.page_detail = DetailPage()
         self.page_detail.back_requested.connect(self.close_detail)
         self.page_detail.play_requested.connect(self.play)
@@ -1788,7 +1885,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F11"), self, activated=self.toggle_fullscreen)
         QShortcut(QKeySequence("Escape"), self, activated=self.esc_key)
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.edit_search.setFocus())
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=lambda: self.reload_page())
         QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.toggle_side())
+        QShortcut(QKeySequence("F5"), self, activated=lambda: self.reload_page())
 
         self.refresh_server_label()
         if store.get_pref("sidebar_hidden"):
@@ -1928,7 +2027,6 @@ class MainWindow(QMainWindow):
         if not self._nav_wired:
             self.btn_home.clicked.connect(self.show_home)
             self.btn_resume.clicked.connect(self.show_resume)
-            self.btn_search.clicked.connect(self.show_search)
             self._nav_wired = True
         self.rebuild_libs()
         self.btn_home.setChecked(True)
@@ -1941,10 +2039,10 @@ class MainWindow(QMainWindow):
             return sid
         return next(iter(self.emby.clients), "")
 
-    def views_of_active(self):
-        """只属于当前选中服务器的媒体库 —— 不合并。"""
+    def views_of_active(self, force=False):
+        """只属于当前选中服务器的媒体库 —— 不合并。走缓存，不每次都问服务器。"""
         try:
-            views = self.emby.views()
+            views = self.emby.views(force=force)
         except EmbyError:
             views = []
         sid = self.active_server()
@@ -1988,6 +2086,9 @@ class MainWindow(QMainWindow):
             self.lib_box.addWidget(b)
 
     def _clear_grid(self):
+        self._grid_tok += 1          # 让还在排队的分批填充立刻失效
+        self._grid_items = None
+        self._grid_shown = 0
         self.page_browse.grid.clear_all()
         self.lbl_count.setText("")
 
@@ -2008,7 +2109,47 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.page_browse)
         self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
-    def show_lib(self, view, title):
+    # 一批往海报墙塞多少张卡：500 张一次性建完，主线程要卡住 1~2 s。
+    # 分批之后首屏立刻有内容，剩下的等用户滚到底再追加（need_more）。
+    GRID_CHUNK = 120
+    _grid_tok = 0
+    _grid_items = None
+    _grid_shown = 0
+
+    def _append_page(self):
+        """往海报墙追加一小批。滚到底会再触发一次，所以不用一次建完 946 张。"""
+        items = self._grid_items or []
+        if self._grid_shown >= len(items):
+            return
+        piece = items[self._grid_shown:self._grid_shown + self.GRID_CHUNK]
+        for it in piece:
+            self._add(it)
+        self._grid_shown += len(piece)
+        grid = self.page_browse.grid
+        QTimer.singleShot(0, grid.fill_visible)     # 布局算完再按可视区取图
+
+    def _reset_grid(self, items):
+        self._grid_items = items
+        self._grid_shown = 0
+        self._grid_tok += 1
+        self._append_page()
+
+    def reload_page(self):
+        """⟳ / Ctrl+R / F5：忽略本地缓存，把当前这一页重新要一遍。"""
+        n = 0
+        try:
+            n = self.emby.refresh(self.active_server() or None)
+        except Exception:
+            pass
+        fn = getattr(self, "_reload_fn", None)
+        if fn:
+            fn()
+        else:
+            self.show_home()
+        if n:
+            self.lbl_count.setText((self.lbl_count.text() or "") + "  · 缓存已清 %d 项" % n)
+
+    def show_lib(self, view, title, force=False):
         if view is None:
             self.show_home()
             return
@@ -2016,23 +2157,26 @@ class MainWindow(QMainWindow):
         self.page_browse.clear_backdrop()
         self.lbl_page.setText(title or "首页")
         self._clear_grid()
+        self._reload_fn = lambda: self.show_lib(view, title, force=True)
         try:
-            if view is None:
-                self._load_home()
-                return
             ctype = view.get("CollectionType")
-            types = {"movies": "Movie", "tvshows": "Series"}.get(ctype)
-            items = self.emby.view_items(view, 500, types)
-            for it in items:
-                self._add(it)
-            self.lbl_count.setText("共 %d 项 · %s" % (len(items), view.get("server") or ""))
+            if ctype == "livetv":
+                # 直播库必须走 /LiveTv/Channels：拿 /Items 递归查会返回整个服务器
+                items, total = self.emby.channels_page(view, 1000, force=force)
+                unit = "个频道"
+            else:
+                types = {"movies": "Movie", "tvshows": "Series"}.get(ctype)
+                items, total = self.emby.items_page(view, 500, types, force=force)
+                unit = "项"
+            self.lbl_count.setText("共 %d %s · %s" % (total, unit, view.get("server") or ""))
+            self._reset_grid(items)
             # 用库内第一部片的背景图当页面模糊底
             pick = None
             for it in items[:6]:
                 if (it.get("BackdropImageTags") or []):
                     pick = (self.emby.backdrop_url(it, 720), it["Id"])
                     break
-            if pick is None and items:
+            if pick is None and items and items[0].get("ImageTags"):
                 it0 = items[0]
                 pick = (self.emby.image_url(it0, "Primary", 480), "p" + it0["Id"])
             if pick:
@@ -2041,7 +2185,7 @@ class MainWindow(QMainWindow):
         except EmbyError as e:
             self.lbl_count.setText("加载失败: " + str(e))
 
-    def show_home(self):
+    def show_home(self, force=False):
         """首页：随机推荐（5 部可换一批）+ 媒体库表。继续观看挪到侧栏那个按钮里。"""
         if not self.emby.clients:
             self.show_welcome()
@@ -2054,29 +2198,17 @@ class MainWindow(QMainWindow):
         if not b.isChecked():
             b.setChecked(True)
         sid = self.active_server()
-        self.page_home.load(self.emby, self.views_of_active(), sid)
-
-    def show_search(self):
-        """点「搜索」要真的切页并聚焦输入框，不能看着没反应。"""
-        self._show_browse()
-        self.lbl_page.setText("搜索")
-        self._clear_grid()
-        term = self.edit_search.text().strip()
-        if term:
-            self.do_search()
-        else:
-            self.lbl_count.setText("在上面输入片名 / 剧名，回车搜索")
-        self.edit_search.setFocus()
-        self.edit_search.selectAll()
+        self._reload_fn = lambda: self.show_home(force=True)
+        self.page_home.load(self.emby, self.views_of_active(force=force), sid)
 
     def show_resume(self):
         self._show_browse()
         self.lbl_page.setText("继续观看")
         self._clear_grid()
+        self._reload_fn = self.show_resume
         try:
             items = self.emby.resume(48)
-            for it in items:
-                self._add(it)
+            self._reset_grid(items)
             self.lbl_count.setText(f"{len(items)} 项")
         except EmbyError as e:
             self.lbl_count.setText(str(e))
@@ -2088,11 +2220,11 @@ class MainWindow(QMainWindow):
         self._show_browse()
         self.lbl_page.setText(f"搜索：{term}")
         self._clear_grid()
+        self._reload_fn = self.do_search
         try:
             items = self.emby.search(term)
-            for it in items:
-                if it.get("Type") in ("Movie", "Series", "Episode"):
-                    self._add(it)
+            items = [it for it in items if it.get("Type") in ("Movie", "Series", "Episode")]
+            self._reset_grid(items)
             self.lbl_count.setText(f"{len(items)} 个结果")
         except EmbyError as e:
             self.lbl_count.setText(str(e))
@@ -2100,6 +2232,9 @@ class MainWindow(QMainWindow):
     # ---------- 详情 ----------
     def open_item(self, item):
         t = item.get("Type")
+        if t == "TvChannel":
+            self.play(item)          # 直播没有"详情"可看，点一下就播
+            return
         if t in ("Folder", "BoxSet", "Season"):
             # 文件夹/季：直接列出内容
             self.lbl_page.setText(item_title(item))
