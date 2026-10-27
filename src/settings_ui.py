@@ -11,10 +11,68 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QFrame, QGridLayout, QScrollArea, QColorDialog,
-                               QSizePolicy, QButtonGroup, QLineEdit, QCheckBox, QSlider)
+                               QSizePolicy, QButtonGroup, QLineEdit, QCheckBox, QSlider,
+                               QStackedWidget)
 
 import theme
 from setup_ui import Glass, _title
+
+
+# ═══════════════════════ 设置页（服务器 / 外观） ═══════════════════════
+class SettingsPage(QWidget):
+    """设置容器：把「服务器」和「外观」收进来。
+
+    主界面侧栏只留一个「设置」入口 —— 服务器地址这类东西不该占着主界面。
+    """
+
+    def __init__(self, servers_page, appearance_page, parent=None):
+        super().__init__(parent)
+        self.servers_page = servers_page
+        self.appearance_page = appearance_page
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+
+        bar = QWidget()
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(theme.PAGE_MARGINS[0], theme.PAGE_MARGINS[1],
+                              theme.PAGE_MARGINS[2], 0)
+        bl.setSpacing(theme.SP2)
+
+        self.btn_servers = QPushButton("服务器")
+        self.btn_appearance = QPushButton("外观")
+        self._group = QButtonGroup(self)
+        for b in (self.btn_servers, self.btn_appearance):
+            b.setObjectName("Tab")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            self._group.addButton(b)
+            bl.addWidget(b)
+        bl.addStretch(1)
+        v.addWidget(bar)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(servers_page)
+        self.stack.addWidget(appearance_page)
+        v.addWidget(self.stack, 1)
+
+        self.btn_servers.clicked.connect(lambda: self.show_tab("servers"))
+        self.btn_appearance.clicked.connect(lambda: self.show_tab("appearance"))
+        self.show_tab("servers")
+
+    def show_tab(self, which="servers"):
+        """切到某一栏，返回实际生效的栏名（外部脚本判断用）。"""
+        if which == "appearance":
+            self.stack.setCurrentWidget(self.appearance_page)
+            self.btn_appearance.setChecked(True)
+            return "appearance"
+        self.stack.setCurrentWidget(self.servers_page)
+        self.btn_servers.setChecked(True)
+        return "servers"
+
+    def current_tab(self):
+        return "appearance" if self.stack.currentWidget() is self.appearance_page else "servers"
 
 
 # ═══════════════════════ 配色格子 ═══════════════════════
@@ -91,7 +149,9 @@ class AppearancePage(QWidget):
         self._syncing = False
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(*theme.PAGE_MARGINS)
+        # 外面上级 SettingsPage 已经给了上边距，这里只补左右下
+        v.setContentsMargins(theme.PAGE_MARGINS[0], theme.SP3,
+                              theme.PAGE_MARGINS[2], theme.PAGE_MARGINS[3])
         v.setSpacing(14)
 
         scroll = QScrollArea()

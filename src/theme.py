@@ -294,6 +294,27 @@ QPushButton#NavItem:checked {{
     font-weight: 600;
 }}
 
+/* 侧栏的服务器切换器（多服务器时才出现）：做成导航项的样子，不抢眼 */
+QComboBox#ServerPick {{
+    background: {GLASS_BG}; border: 1px solid rgba(255,255,255,0.10);
+    border-radius: {R_CTRL}px; padding: 0 10px; margin: 2px 10px 6px 10px;
+    min-height: 32px; color: {TEXT}; font-size: 12px;
+}}
+QComboBox#ServerPick:hover {{ background: {GLASS_BG_HOVER}; }}
+
+/* 设置页内部的分栏切换（服务器 / 外观） */
+QPushButton#Tab {{
+    background: transparent; border: 1px solid transparent;
+    border-radius: {R_CTRL}px; padding: 0 18px; min-height: {H_CTRL}px;
+    color: {TEXT_DIM};
+}}
+QPushButton#Tab:hover {{ color: {TEXT}; background: {GLASS_BG_HOVER}; }}
+QPushButton#Tab:checked {{
+    background: {rgba(active, 0.20)};
+    border: 1px solid {rgba(hi, 0.35)};
+    color: {TEXT}; font-weight: 600;
+}}
+
 /* ── 字号层级：只有这五档 ── */
 #H1, #PageTitle {{ font-size: 20px; font-weight: 700; }}
 #H2, #SecTitle {{ font-size: 15px; font-weight: 700; color: {TEXT};

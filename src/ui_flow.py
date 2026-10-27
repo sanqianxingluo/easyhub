@@ -127,7 +127,8 @@ def main():
     try:
         w.close_player(); pump(app, 1)
         w.show_servers(); pump(app, 1)
-        ck("server_page", w.stack.currentWidget() is w.page_servers)
+        ck("server_page", w.stack.currentWidget() is w.page_settings
+           and w.page_settings.current_tab() == "servers")
         w.grab().save(os.path.join(BASE, "cap_servers.png"))
         from setup_ui import ServerDialog
         d = ServerDialog(None, w)

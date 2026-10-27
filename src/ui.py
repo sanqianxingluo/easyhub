@@ -35,7 +35,7 @@ from emby import Emby, EmbyError
 from library import MultiEmby
 from paths import cache_dir
 from setup_ui import WelcomePage, ServerPage, ServerDialog
-from settings_ui import AppearancePage
+from settings_ui import AppearancePage, SettingsPage
 from version import APP_VERSION
 
 CACHE_DIR = cache_dir()
@@ -349,8 +349,12 @@ class PosterGrid(QListWidget):
 
 
 # ═══════════════════════ 首页：随机推荐 + 媒体库表 ═══════════════════════
-ICONS = {"movies": "◆", "tvshows": "▣", "music": "♪", "livetv": "◉",
-         "homevideos": "▤", "books": "▥", "boxsets": "◈", "musicvideos": "♫"}
+# 侧栏 / 首页的库类型图标只挑「同一字号下包围盒一样高」的符号：
+# 13px 下 ◆ ■ ● ♪ ▲ 都是 16px 高，而原来用的 ▣ ▤ ▥ ◈ ◉ 只有 13px ——
+# 比别的字形整整小一号，看着就像「有的图标看不清」。换符号前先量一下。
+ICONS = {"movies": "◆", "tvshows": "■", "music": "♪", "livetv": "●",
+         "homevideos": "▲", "books": "■", "boxsets": "◆", "musicvideos": "♪"}
+ICON_FALLBACK = "■"
 KINDS = {"movies": "电影", "tvshows": "剧集", "music": "音乐", "livetv": "电视直播",
          "homevideos": "家庭视频", "books": "图书", "boxsets": "合集", "musicvideos": "音乐视频"}
 
@@ -419,7 +423,7 @@ class LibTile(QFrame):
         h.setContentsMargins(theme.SP4, theme.SP3, theme.SP4, theme.SP3)
         h.setSpacing(theme.SP3)
         # 未知类型也给一个和别的图标同字重的方块，别退化成小点（看着像坏了）
-        self.ic = QLabel("▣")
+        self.ic = QLabel(ICON_FALLBACK)
         self.ic.setObjectName("LibIcon")
         self.ic.setFixedWidth(28)
         self.ic.setAlignment(Qt.AlignCenter)
@@ -441,7 +445,7 @@ class LibTile(QFrame):
     def set_view(self, v):
         self.data = v
         name = v.get("Name", "")
-        self.ic.setText(ICONS.get(v.get("CollectionType"), "▣"))
+        self.ic.setText(ICONS.get(v.get("CollectionType"), ICON_FALLBACK))
         self.title.setText(name)
         self.title.setToolTip(name)
         srv = v.get("server") or ""
@@ -487,6 +491,7 @@ class HomePage(GlassBackdrop):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.emby = None
+        self.sid = None            # 当前选中的服务器（推荐也只从这台挑）
         self.tiles = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(*theme.PAGE_MARGINS)
@@ -579,7 +584,7 @@ class HomePage(GlassBackdrop):
     # ---- 随机推荐 ----
     def load_recs(self):
         try:
-            items = self.emby.random_movies(self.REC_N)
+            items = self.emby.random_movies(self.REC_N, self.sid)
         except Exception:
             items = []
         for i, c in enumerate(self.cards):
@@ -591,9 +596,10 @@ class HomePage(GlassBackdrop):
             else:
                 c.setVisible(False)
 
-    def load(self, emby, views=None):
-        """进首页：填库表 + 抽推荐。"""
+    def load(self, emby, views=None, sid=None):
+        """进首页：填库表 + 抽推荐。views 只传当前选中服务器的库；推荐也只看这台。"""
         self.emby = emby
+        self.sid = sid
         try:
             vs = self.emby.views() if views is None else views
         except Exception:
@@ -1617,15 +1623,24 @@ class MainWindow(QMainWindow):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
 
-        self.btn_home = self._nav("⌂   首页")
-        self.btn_resume = self._nav("▶   继续观看")
-        self.btn_search = self._nav("⌕   搜索")
+        self.btn_home = self._nav("首页")
+        self.btn_resume = self._nav("继续观看")
+        self.btn_search = self._nav("搜索")
         for b in (self.btn_home, self.btn_resume, self.btn_search):
             sv.addWidget(b)
 
         t2 = QLabel("分类")
         t2.setObjectName("SideTitle")
         sv.addWidget(t2)
+
+        # 多服务器时在这里切换：切到哪台，下面的库列表就只显示哪台的（不合并）。
+        # 只有一台服务器时整个控件隐藏，不占地方也不添乱。
+        self.cmb_server = QComboBox()
+        self.cmb_server.setObjectName("ServerPick")
+        self.cmb_server.setToolTip("切换服务器（各服务器的媒体库分开显示）")
+        self.cmb_server.setVisible(False)
+        self.cmb_server.currentIndexChanged.connect(self._on_server_picked)
+        sv.addWidget(self.cmb_server)
 
         # 库名列表放进滚动区：库多时侧栏高度不够，直接塞进布局会把每个按钮压扁
         # （实测 14 个库 → 按钮 38px 被挤到 29px → 文字纵向压成一条）。
@@ -1653,18 +1668,10 @@ class MainWindow(QMainWindow):
         t3 = QLabel("设置")
         t3.setObjectName("SideTitle")
         sv.addWidget(t3)
-        self.btn_servers = self._nav("⚙   服务器")
-        self.btn_servers.clicked.connect(self.show_servers)
-        sv.addWidget(self.btn_servers)
-        self.btn_appearance = self._nav("◑   外观")
-        self.btn_appearance.clicked.connect(self.show_appearance)
-        sv.addWidget(self.btn_appearance)
-
-        self.lbl_server = QLabel("")
-        self.lbl_server.setObjectName("Hint")
-        self.lbl_server.setWordWrap(True)
-        self.lbl_server.setContentsMargins(18, 0, 14, 0)
-        sv.addWidget(self.lbl_server)
+        # 服务器 / 外观都收进「设置」页里，主界面侧栏只留这一个入口
+        self.btn_settings = self._nav("设置")
+        self.btn_settings.clicked.connect(lambda: self.show_settings())
+        sv.addWidget(self.btn_settings)
 
         h.addWidget(side)
 
@@ -1714,8 +1721,10 @@ class MainWindow(QMainWindow):
         self.page_servers.delete_requested.connect(self.delete_server)
         self.page_appearance = AppearancePage(theme.current())
         self.page_appearance.theme_changed.connect(self.apply_theme)
+        # 这两页现在是「设置」里的两个分栏，不再各占一个侧栏项
+        self.page_settings = SettingsPage(self.page_servers, self.page_appearance)
 
-        for p in (self.page_welcome, self.page_servers, self.page_appearance,
+        for p in (self.page_welcome, self.page_settings,
                   self.page_home, self.page_browse, self.page_detail,
                   self.page_player):
             self.stack.addWidget(p)
@@ -1774,23 +1783,11 @@ class MainWindow(QMainWindow):
             self.load_views()
 
     def refresh_server_label(self):
-        """左下角只显示服务器名，地址放进 tooltip。
+        """侧栏底部不再显示服务器信息 —— 名字和地址都挪进「设置 → 服务器」。
 
-        地址（https://xxx:18888）又长又不常看，常驻会把侧栏底部撑得很吵；
-        想知道走内网还是外网，悬停即可，或去「服务器」页看。
+        主界面只保留「还没有接入服务器」这一句提示（没服务器时引导一下）。
         """
         n = len(self.emby.clients)
-        if n == 0:
-            self.lbl_server.setText("未接入服务器")
-            self.lbl_server.setToolTip("")
-        elif n == 1:
-            sid = list(self.emby.clients)[0]
-            self.lbl_server.setText(self.emby.server_name(sid))
-            self.lbl_server.setToolTip(self.emby.bases.get(sid, ""))
-        else:
-            self.lbl_server.setText("已接入 %d 个服务器" % n)
-            self.lbl_server.setToolTip(
-                "\n".join(self.emby.server_name(s) for s in self.emby.clients))
         self.side_empty.setVisible(n == 0)
 
     def show_welcome(self):
@@ -1799,19 +1796,23 @@ class MainWindow(QMainWindow):
         self.lbl_count.setText("")
         self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
-    def show_servers(self):
-        self.page_servers.render(self.store, self.emby)
-        self.stack.setCurrentWidget(self.page_servers)
-        self.lbl_page.setText("服务器")
+    def show_settings(self, tab="servers"):
+        """设置页（服务器 / 外观两栏）。服务器不再单占一个侧栏入口。"""
+        tab = self.page_settings.show_tab(tab)
+        if tab == "servers":
+            self.page_servers.render(self.store, self.emby)
+        else:
+            self.page_appearance.sync(theme.current())
+        self.stack.setCurrentWidget(self.page_settings)
+        self.lbl_page.setText("设置")
         self.lbl_count.setText("")
         self.setWindowTitle("EasyHub %s" % APP_VERSION)
 
+    def show_servers(self):
+        self.show_settings("servers")
+
     def show_appearance(self):
-        self.page_appearance.sync(theme.current())
-        self.stack.setCurrentWidget(self.page_appearance)
-        self.lbl_page.setText("外观")
-        self.lbl_count.setText("")
-        self.setWindowTitle("EasyHub %s" % APP_VERSION)
+        self.show_settings("appearance")
 
     def apply_theme(self, palette):
         """换配色：重设全局 QSS、落盘、把所有自绘背景的页面重画一遍。
@@ -1829,7 +1830,7 @@ class MainWindow(QMainWindow):
             self.page_appearance.sync(theme.current())
         except Exception:
             pass
-        for p in (self.page_welcome, self.page_servers, self.page_appearance,
+        for p in (self.page_welcome, self.page_settings,
                   self.page_home, self.page_browse, self.page_detail):
             p.update()
 
@@ -1883,6 +1884,44 @@ class MainWindow(QMainWindow):
         self.btn_home.setChecked(True)
         self.show_home()
 
+    def active_server(self):
+        """当前选中的服务器（记在 prefs 里，重启还记得）。"""
+        sid = self.store.get_pref("active_server") or ""
+        if sid in self.emby.clients:
+            return sid
+        return next(iter(self.emby.clients), "")
+
+    def views_of_active(self):
+        """只属于当前选中服务器的媒体库 —— 不合并。"""
+        try:
+            views = self.emby.views()
+        except EmbyError:
+            views = []
+        sid = self.active_server()
+        return [v for v in views if v.get("_srv") == sid]
+
+    def _fill_server_pick(self):
+        """侧栏的服务器切换器：只有一台时整个隐藏。"""
+        ids = list(self.emby.clients)
+        self.cmb_server.blockSignals(True)
+        self.cmb_server.clear()
+        for sid in ids:
+            self.cmb_server.addItem(self.emby.server_name(sid), sid)
+        idx = self.cmb_server.findData(self.active_server())
+        if idx >= 0:
+            self.cmb_server.setCurrentIndex(idx)
+        self.cmb_server.blockSignals(False)
+        self.cmb_server.setVisible(len(ids) > 1)
+
+    def _on_server_picked(self, _idx):
+        sid = self.cmb_server.currentData()
+        if not sid:
+            return
+        self.store.set_pref("active_server", sid)
+        self.rebuild_libs()
+        self.btn_home.setChecked(True)
+        self.show_home()
+
     def rebuild_libs(self):
         # 清掉旧的库按钮
         while self.lib_box.count():
@@ -1891,32 +1930,12 @@ class MainWindow(QMainWindow):
             if w:
                 self.nav_group.removeButton(w)
                 w.deleteLater()
-        try:
-            views = self.emby.views()
-        except EmbyError:
-            views = []
-        icons = {"movies": "◆", "tvshows": "▣", "music": "♪", "livetv": "◉",
-                 "homevideos": "▤", "books": "▥", "boxsets": "◈", "musicvideos": "♫"}
-        # 按服务器分组 —— 不合并，各管各的
-        groups, order = {}, []
-        for v in views:
-            sid = v.get("_srv")
-            if sid not in groups:
-                groups[sid] = []
-                order.append(sid)
-            groups[sid].append(v)
-        multi = len(order) > 1
-        for sid in order:
-            if multi:
-                h = QLabel(self.emby.server_name(sid))
-                h.setObjectName("SideSub")
-                self.lib_box.addWidget(h)
-            for v in groups[sid]:
-                ic = icons.get(v.get("CollectionType"), "▪")
-                b = self._nav("%s   %s" % (ic, v["Name"]), full=v["Name"])
-                b.setToolTip("来自：%s" % (v.get("server") or self.emby.server_name(sid)))
-                b.clicked.connect(lambda _=False, vv=v: self.show_lib(vv, vv["Name"]))
-                self.lib_box.addWidget(b)
+        self._fill_server_pick()
+        # 只列当前服务器的库：切到哪台就显示哪台，不做合并、也不加分组标题
+        for v in self.views_of_active():
+            b = self._nav(v["Name"], full=v["Name"])
+            b.clicked.connect(lambda _=False, vv=v: self.show_lib(vv, vv["Name"]))
+            self.lib_box.addWidget(b)
 
     def _clear_grid(self):
         self.page_browse.grid.clear_all()
@@ -1927,9 +1946,9 @@ class MainWindow(QMainWindow):
         key = "%s:%s" % (it.get("_srv") or "x", iid)
         tag = (it.get("ImageTags") or {}).get("Primary")
         data = dict(it)
-        # 只有一台服务器时不用逐张标出处；多台才标（各管各的，必须看得清来源）
-        data["_srvname"] = (self.emby.server_name(it.get("_srv"))
-                            if len(getattr(self.emby, "clients", {}) or {}) > 1 else "")
+        # 现在一次只看一台服务器的内容，海报上不用再标出处（跨服务器的「搜索」才需要看来源，
+        # 那条路径由 tooltip 里的信息覆盖）
+        data["_srvname"] = ""
         if prefix:
             data["Name"] = prefix + it.get("Name", "")
         self.page_browse.grid.add_entry(data, key,
@@ -1984,7 +2003,8 @@ class MainWindow(QMainWindow):
         b = self.btn_home
         if not b.isChecked():
             b.setChecked(True)
-        self.page_home.load(self.emby)
+        sid = self.active_server()
+        self.page_home.load(self.emby, self.views_of_active(), sid)
 
     def show_search(self):
         """点「搜索」要真的切页并聚焦输入框，不能看着没反应。"""

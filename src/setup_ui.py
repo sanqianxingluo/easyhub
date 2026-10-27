@@ -304,7 +304,9 @@ class ServerPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self)
-        v.setContentsMargins(*theme.PAGE_MARGINS)
+        # 外面上级 SettingsPage 已经给了上边距，这里只补左右下
+        v.setContentsMargins(theme.PAGE_MARGINS[0], theme.SP3,
+                              theme.PAGE_MARGINS[2], theme.PAGE_MARGINS[3])
         v.setSpacing(theme.SECTION_GAP)
 
         head = QHBoxLayout()

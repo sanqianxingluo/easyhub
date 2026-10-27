@@ -124,7 +124,8 @@ def main():
         w.show_servers()
         pump(app, 2)
         w.grab().save(os.path.join(BASE, "v2_servers.png"))
-        ck("servers_page_ok", w.stack.currentWidget() is w.page_servers)
+        ck("servers_page_ok", w.stack.currentWidget() is w.page_settings
+           and w.page_settings.current_tab() == "servers")
     except Exception as e:
         out["errors"].append({"ui": repr(e)})
         ck("detail_ok", False, repr(e))

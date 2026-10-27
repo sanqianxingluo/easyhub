@@ -141,12 +141,18 @@ class MultiEmby:
     def resume(self, limit=48):
         return self._gather(lambda c, n: c.resume(n).get("Items", []), limit, _played)
 
-    def random_movies(self, limit=5):
-        """跨服务器随机推荐：每台各捞一批，混起来再随机挑 limit 部。"""
+    def random_movies(self, limit=5, sid=None):
+        """随机推荐：每台各捞一批，混起来再随机挑 limit 部。
+
+        sid 给了就只从那一台挑 —— 侧栏切到某台服务器时，首页推荐也跟着走，
+        免得「只显示这台库」却推荐了别台的片。
+        """
         pool = []
-        for sid, cli in self.clients.items():
+        for s, cli in self.clients.items():
+            if sid and s != sid:
+                continue
             try:
-                pool.extend(self._tag(sid, cli.random_movies(max(limit, 8))))
+                pool.extend(self._tag(s, cli.random_movies(max(limit, 8))))
             except EmbyError:
                 continue
         random.shuffle(pool)
