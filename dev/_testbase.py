@@ -4,6 +4,11 @@ import sys
 import time
 import traceback
 
+# 这些自检脚本住在 dev\，程序在 src\ —— 先把 src 放进 sys.path 再 import 应用模块
+_SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
 from paths import app_dir
 
 BASE = app_dir()

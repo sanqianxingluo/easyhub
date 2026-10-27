@@ -88,20 +88,32 @@ Ctrl+R / F5 刷新当前页 · Ctrl+B 收起侧栏
 
 ```
 EasyHub/
-├─ main.py / ui.py / player.py / emby.py / theme.py    主程序
-├─ servers.py      服务器配置（双地址 / 协议 / 端口 / WiFi）
-├─ library.py      多服务器聚合 + 列表缓存接入
-├─ libcache.py     列表缓存（内存 + 磁盘，TTL）
-├─ setup_ui.py     欢迎页 / 服务器列表 / 添加对话框
-├─ settings_ui.py  外观设置（预设配色 / 自定义强调色）
-├─ paths.py        程序目录（兼容打包）
-├─ selftest.py / ui_flow.py / check_home.py            自检脚本（界面 / 首页）
-├─ libmpv-2.dll (115MB)                                解码内核，必须与程序同目录
-├─ servers.json                                        服务器配置（在软件里改）
+├─ src/
+│  ├─ main.py            入口（QApplication + 连服务器 + 主窗口）
+│  ├─ mainwindow.py      主窗口：侧栏 / 标题栏 / 页面切换 / 快捷键
+│  ├─ page_home.py       首页        page_browse.py  浏览页（海报墙容器）
+│  ├─ page_detail.py     详情页      page_player.py  播放页 + 悬浮控制条
+│  ├─ poster.py          海报网格 / 推荐卡 / 媒体库格
+│  ├─ widgets.py         图片异步加载 / 玻璃背景 / 显示名与悬停文本
+│  ├─ player.py          libmpv 封装（硬解探测 / 播放 / 音轨字幕）
+│  ├─ emby.py            Emby API 客户端      library.py  多服务器聚合 + 缓存接入
+│  ├─ libcache.py        列表缓存（内存 + 磁盘，TTL）
+│  ├─ servers.py         服务器配置（双地址 / 协议 / 端口 / WiFi）
+│  ├─ setup_ui.py        欢迎页 / 服务器列表 / 添加对话框
+│  ├─ settings_ui.py     设置页（服务器 + 外观两栏）
+│  ├─ theme.py           配色与全局 QSS      paths.py  程序目录（兼容打包）
+│  ├─ ui.py              兼容入口：`from ui import MainWindow` 仍然有效
+│  ├─ libmpv-2.dll (115MB)                  解码内核，必须与程序同目录
+│  └─ servers.json                          服务器配置（在软件里改）
+├─ dev/             自检 / 截图脚本（不进发布包）见 dev/README.md
 ├─ packaging/       发版脚本：make_release.ps1 + easyhub.iss（安装包配置）
+├─ requirements.txt 运行依赖
 ├─ dist/EasyHub/    ← 目录版成品：EasyHub.exe + 依赖
 └─ release/         ← 发版产物：Setup / Portable（不进仓库）
 ```
+
+界面层的依赖方向是单向的：`widgets → poster → page_* → mainwindow`，
+页面之间互不 import，`main.py` / 外部脚本只认 `ui.MainWindow`。
 
 ## 用打包好的 exe
 
@@ -137,22 +149,24 @@ EasyHub/
 只想手动打个目录版跑跑：
 
 ```bat
+cd src
 python -m PyInstaller --noconfirm --clean --windowed --name EasyHub --onedir main.py
 copy libmpv-2.dll dist\EasyHub\
+cd ..
 ```
 
 ## 从源码跑
 
 1. 装 Python 3.11+（勾 Add to PATH）
-2. `install.bat`（装 PySide6 + python-mpv，走清华镜像）
-3. `python main.py`
+2. `install.bat`（装 PySide6 + python-mpv，走清华镜像），或 `pip install -r requirements.txt`
+3. `python src\main.py`
 
-自检：
+自检（都在 `dev\` 下，脚本会自己把 `src\` 加进 `sys.path`）：
 
 ```
-python main.py --probe    # 打包后环境自检（libmpv 能否加载、服务器能否连上）
-python selftest.py        # 连库→取片→播放→换音轨→切字幕→seek
-python ui_flow.py         # 遍历全部媒体库 + 详情页 + 播放 + 选集 + 服务器管理，出截图
+python src\main.py --probe    # 打包后环境自检（libmpv 能否加载、服务器能否连上）
+python dev\selftest.py        # 连库→取片→播放→换音轨→切字幕→seek
+python dev\ui_flow.py         # 遍历全部媒体库 + 详情页 + 播放 + 选集 + 服务器管理，出截图
 ```
 
 ## 关键实现点
@@ -318,8 +332,8 @@ qm sendkey <vmid> shift                              # 屏幕休眠时 screendum
 printf 'screendump /tmp/x.ppm\n' | qm monitor <vmid>   # P6 裸 RGB，用 struct+zlib 自己写 PNG
 ```
 
-`src/show_page.py` 负责把窗口停在指定页面并保持显示，配合上面的命令就能拿到真机画面：
+`dev/show_page.py` 负责把窗口停在指定页面并保持显示，配合上面的命令就能拿到真机画面：
 
 ```
-python show_page.py lib|detail|player|servers
+python dev\show_page.py lib|detail|player|servers
 ```
