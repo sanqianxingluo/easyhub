@@ -5,10 +5,13 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 ## 下载
 
-最新版本：**[v1.1.0](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.1.0)**
+最新版本：**[v1.1.1](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.1.1)**
 
-- `EasyHub-Setup-1.1.0.exe`（66 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC，自带卸载
-- `EasyHub-Portable-1.1.0.exe`（91 MB）—— 便携单文件，双击即用，配置与程序同目录
+- `EasyHub-Setup-1.1.1.exe`（66 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC
+  - **自带卸载**：开始菜单里有「卸载 EasyHub」，也可以在「设置 → 应用」里卸
+- `EasyHub-Portable-1.1.1.exe`（91 MB）—— 便携单文件，双击即用
+  - 配置（`servers.json`、`cache\`）就写在 **exe 旁边**，整个文件夹拷走即带走；
+    放在不可写的目录（如 `Program Files`）时会自动退回 `%APPDATA%\EasyHub`
 
 **两个文件名都带版本号**，下载后一眼能看出是哪一版（窗口标题里也写着版本）。
 
@@ -208,6 +211,22 @@ GET /Videos/{id}/stream?Static=true&api_key=<token>
 配色统一走 `theme.set_current()` + `app.setStyleSheet(theme.build_qss())`：
 页面背景是 `paintEvent` 现画的（取 `theme.current()`），所以换完 update() 一下，
 所有页面立刻跟着变，不需要重建控件、也不丢当前浏览状态。
+
+### 7. 便携版怎么判断「配置放哪」
+
+`paths.py` 的判断顺序：
+
+1. 源码运行 → 源码目录
+2. **包里自带 `portable.txt`**（便携单文件版打包时用 `--add-data` 塞进 `_MEIPASS`），
+   或者 exe 旁边有 `portable.txt` / `servers.json` → 程序目录
+3. 都不满足 → `%APPDATA%\EasyHub`（安装版走这条）
+
+第 2 步会先探一次**目录可写性**：便携版被丢进 `Program Files` 这类受保护目录时，
+程序目录写不了就退回 APPDATA，不会一启动就崩。
+
+**坑**：单文件版（onefile）的 `sys.executable` 是 exe 的真实路径，而包里塞的文件解压到
+`sys._MEIPASS` —— 只查 exe 旁边永远查不到那个标记，必须**两处都查**。
+（1.1.0 之前就是只查 exe 旁边，所以「便携版配置与程序同目录」实际没生效。）
 
 ## 运行环境实测
 

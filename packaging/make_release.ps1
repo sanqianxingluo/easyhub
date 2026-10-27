@@ -182,13 +182,27 @@ try {
 
     # ── 2. 便携单文件 ──
     if (-not $SkipPortable) {
-        Write-Step "打包便携版（onefile，libmpv 打进包里）"
+        Write-Step "打包便携版（onefile，libmpv + portable.txt 都打进包里）"
         $sw.Restart()
-        $null = Invoke-Tool $Python @(
-            '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
-            '--name', 'EasyHub-Portable', '--onefile',
-            '--add-binary', "$LibMpv;.", 'main.py'
-        ) 'PyInstaller onefile'
+        # 便携版要真正做到「配置与程序同目录」：把 portable.txt 打进包里，
+        # paths.is_portable() 会去 _MEIPASS 找它（目录版/安装版不带这个标记）
+        $marker = Join-Path $Src 'portable.txt'
+        $markerMade = $false
+        if (-not (Test-Path $marker)) {
+            [IO.File]::WriteAllText($marker, "EasyHub 便携版标记：配置写在程序同目录。`r`n",
+                (New-Object System.Text.UTF8Encoding($false)))
+            $markerMade = $true
+        }
+        try {
+            $null = Invoke-Tool $Python @(
+                '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
+                '--name', 'EasyHub-Portable', '--onefile',
+                '--add-binary', "$LibMpv;.", '--add-data', "$marker;.", 'main.py'
+            ) 'PyInstaller onefile'
+        }
+        finally {
+            if ($markerMade) { Remove-Item $marker -Force -ErrorAction SilentlyContinue }
+        }
         $portableSrc = Join-Path $Src 'dist\EasyHub-Portable.exe'
         if (-not (Test-Path $portableSrc)) { throw "打包失败：没有 dist\EasyHub-Portable.exe" }
         $portable = Join-Path $Release "EasyHub-Portable-$Version.exe"
@@ -207,6 +221,14 @@ if (-not $SkipSetup) {
     Write-Step "生成安装包（Inno Setup）"
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $iss = Join-Path $PSScriptRoot 'easyhub.iss'
+    # Inno 6 对不带 BOM 的 .iss 按 ANSI 解码 —— 中文字面量会变乱码，而且不报错。
+    # 多数编辑器存盘会吃掉 BOM，所以这里兜一道：没有就补上。
+    $issBytes = [IO.File]::ReadAllBytes($iss)
+    if (-not ($issBytes.Length -ge 3 -and $issBytes[0] -eq 0xEF -and $issBytes[1] -eq 0xBB -and $issBytes[2] -eq 0xBF)) {
+        $issText = [Text.Encoding]::UTF8.GetString($issBytes)
+        [IO.File]::WriteAllBytes($iss, [byte[]](0xEF, 0xBB, 0xBF) + [Text.Encoding]::UTF8.GetBytes($issText))
+        Write-Warn2 "easyhub.iss 少了 UTF-8 BOM（编辑器存盘吃掉了），已自动补上"
+    }
     $null = Invoke-Tool $Iscc @(
         "/DAppVersion=$Version",
         "/DSrcDir=$(Join-Path $Src 'dist\EasyHub')",
@@ -222,7 +244,12 @@ if (-not $SkipSetup) {
 
 # ── 4. 汇总 + 哈希 + Release 说明草稿 ──
 Write-Step "产物与 SHA256"
-$files = Get-ChildItem $Release -Filter 'EasyHub-*-*.exe' | Sort-Object Name
+# 只认当前版本的产物：release\ 里可能还留着上一版的 exe
+$files = Get-ChildItem $Release -Filter "EasyHub-*-$Version.exe" | Sort-Object Name
+$stale = Get-ChildItem $Release -Filter 'EasyHub-*-*.exe' | Where-Object { $_.Name -notlike "*-$Version.exe" }
+if ($stale) {
+    Write-Warn2 ("release\ 里还有别的版本，未计入本次：{0}" -f (($stale | ForEach-Object Name) -join ', '))
+}
 if (-not $files) { throw "release\ 下没有产物" }
 $rows = foreach ($f in $files) {
     [pscustomobject]@{
