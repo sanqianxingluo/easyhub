@@ -302,8 +302,6 @@ QPushButton#NavItem:checked {{
 #Caption, #Hint {{ color: {TEXT_DIM}; font-size: 12px; }}
 #Micro, #StatLabel {{ color: {TEXT_DIM2}; font-size: 11px; letter-spacing: 0.6px; }}
 #Icon {{ color: {c["icon"]}; }}
-#StatusOk {{ color: {a1}; font-size: 12px; }}
-#StatusWarn {{ color: {RATING}; font-size: 12px; }}
 
 #RecCard, #LibTile {{ background: transparent; }}
 #RecPic {{ background: rgba(255,255,255,0.05); border-radius: {R_CTRL}px;

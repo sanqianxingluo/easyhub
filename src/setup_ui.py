@@ -467,18 +467,38 @@ class ServerPage(QWidget):
 
     @staticmethod
     def _status(conf, multi):
-        # 状态用「小圆点 + 文字」，不用 emoji ✅：全应用只有这里冒绿光，跟配色打架
+        """连接状态：小圆点 + 「已连接」浅字。
+
+        不要大字/emoji（✅ 那种）：它比卡片里所有文字都抢眼，而且地址卡片上已经列了，
+        状态行再重复一遍地址只会显得吵。完整地址放进 tooltip。
+        """
+        def dot(color):
+            d = QLabel()
+            d.setFixedSize(6, 6)
+            d.setStyleSheet("background: %s; border-radius: 3px;" % color)
+            return d
+
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SP2)
+        row.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
         if not conf.enabled:
-            l = QLabel("●  已停用")
-            l.setObjectName("Hint")
-            return l
-        if multi is None or conf.id not in multi.clients:
-            l = QLabel("●  未连接")
-            l.setObjectName("StatusWarn")
-            return l
-        base = multi.bases.get(conf.id, "?")
-        which = "内网" if conf.lan.set and base == conf.lan.url else (
-            "外网" if conf.wan.set and base == conf.wan.url else "直连")
-        l = QLabel("●  已连接 · %s · %s" % (which, base))
-        l.setObjectName("StatusOk")
-        return l
+            row.addWidget(dot(theme.TEXT_DIM2))
+            txt = QLabel("已停用")
+            txt.setObjectName("Hint")
+        elif multi is None or conf.id not in multi.clients:
+            row.addWidget(dot(theme.RATING))
+            txt = QLabel("未连接")
+            txt.setObjectName("Hint")
+        else:
+            row.addWidget(dot(theme.current()["a1"]))
+            txt = QLabel("已连接")
+            txt.setObjectName("Hint")
+            base = multi.bases.get(conf.id, "?")
+            which = "内网" if conf.lan.set and base == conf.lan.url else (
+                "外网" if conf.wan.set and base == conf.wan.url else "直连")
+            box.setToolTip("经 %s 连接：%s" % (which, base))
+        row.addWidget(txt)
+        return box

@@ -1774,15 +1774,23 @@ class MainWindow(QMainWindow):
             self.load_views()
 
     def refresh_server_label(self):
+        """左下角只显示服务器名，地址放进 tooltip。
+
+        地址（https://xxx:18888）又长又不常看，常驻会把侧栏底部撑得很吵；
+        想知道走内网还是外网，悬停即可，或去「服务器」页看。
+        """
         n = len(self.emby.clients)
         if n == 0:
             self.lbl_server.setText("未接入服务器")
+            self.lbl_server.setToolTip("")
         elif n == 1:
             sid = list(self.emby.clients)[0]
-            self.lbl_server.setText("%s\n%s" % (self.emby.server_name(sid),
-                                                self.emby.bases.get(sid, "")))
+            self.lbl_server.setText(self.emby.server_name(sid))
+            self.lbl_server.setToolTip(self.emby.bases.get(sid, ""))
         else:
-            self.lbl_server.setText("已接入 %d 个服务器（媒体库合并显示）" % n)
+            self.lbl_server.setText("已接入 %d 个服务器" % n)
+            self.lbl_server.setToolTip(
+                "\n".join(self.emby.server_name(s) for s in self.emby.clients))
         self.side_empty.setVisible(n == 0)
 
     def show_welcome(self):
