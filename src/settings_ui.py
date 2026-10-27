@@ -191,6 +191,24 @@ class AppearancePage(QWidget):
         head.addWidget(self.lbl_cur)
         cl.addLayout(head)
 
+        # 明暗模式
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(theme.SP2)
+        mode_row.addWidget(QLabel("模式"))
+        self.btn_dark = QPushButton("深色")
+        self.btn_light = QPushButton("浅色")
+        self._mode_group = QButtonGroup(self)
+        for b in (self.btn_dark, self.btn_light):
+            b.setObjectName("Tab")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            self._mode_group.addButton(b)
+            mode_row.addWidget(b)
+        self.btn_dark.clicked.connect(lambda: self._set_mode("dark"))
+        self.btn_light.clicked.connect(lambda: self._set_mode("light"))
+        mode_row.addStretch(1)
+        cl.addLayout(mode_row)
+
         hint = QLabel("点一下立即换色并保存。强调色、选中态、进度条、图标色会一起变。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
@@ -326,6 +344,16 @@ class AppearancePage(QWidget):
             return
         self.theme_changed.emit(dict(preset))
 
+    def _set_mode(self, mode):
+        """明暗切换：只改 mode，强调色沿用当前的。"""
+        if self._syncing:
+            return
+        cur = theme.current()
+        self.theme_changed.emit({
+            "name": cur.get("name") or "自定义",
+            "a1": cur["a1"], "a2": cur["a2"], "mode": mode,
+        })
+
     def _choose(self, key):
         cur = theme.current()[key]
         c = QColorDialog.getColor(QColor(cur), self, "选择强调色")
@@ -345,14 +373,20 @@ class AppearancePage(QWidget):
         self._group.setExclusive(False)
         matched = False
         for c in self._cards:
+            # 只比强调色 + 明暗：浅色模式下 bg1 是按配色算出来的，和预设里的深色底不同
             same = (c.palette_["a1"] == p["a1"] and c.palette_["a2"] == p["a2"]
-                    and c.palette_["bg1"] == p["bg1"])
+                    and (c.palette_.get("mode") or "dark") == (p.get("mode") or "dark"))
             c.setChecked(same)
             c.refresh()
             matched = matched or same
         self._group.setExclusive(True)
         self._syncing = False
+        # 明暗开关状态
+        is_light = (p.get("mode") == "light")
+        self.btn_dark.setChecked(not is_light)
+        self.btn_light.setChecked(is_light)
         self.sw1.set_color(p["a1"])
         self.sw2.set_color(p["a2"])
         self.bar.set_palette(p)
-        self.lbl_cur.setText("当前：%s" % (p["name"] if matched else "自定义"))
+        self.lbl_cur.setText("当前：%s%s" % (p["name"] if matched else "自定义",
+                                            "（浅色）" if is_light else ""))

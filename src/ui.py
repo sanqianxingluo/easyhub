@@ -210,11 +210,16 @@ class GlassBackdrop(QWidget):
             g.setColorAt(1.0, QColor(c["bg3"]))
             p.fillRect(r, g)
 
-        # 暗色 + 上下渐变，让文字与玻璃面板浮起来
+        # 叠加一层渐变让文字与面板浮起来：深色压暗、浅色提亮
         ov = QLinearGradient(0, 0, 0, r.height())
-        ov.setColorAt(0.0, QColor(8, 10, 16, 165))
-        ov.setColorAt(0.5, QColor(8, 10, 16, 110))
-        ov.setColorAt(1.0, QColor(6, 8, 13, 220))
+        if c.get("mode") == "light":
+            ov.setColorAt(0.0, QColor(255, 255, 255, 150))
+            ov.setColorAt(0.5, QColor(255, 255, 255, 100))
+            ov.setColorAt(1.0, QColor(248, 250, 253, 210))
+        else:
+            ov.setColorAt(0.0, QColor(8, 10, 16, 165))
+            ov.setColorAt(0.5, QColor(8, 10, 16, 110))
+            ov.setColorAt(1.0, QColor(6, 8, 13, 220))
         p.fillRect(r, ov)
         p.end()
 
@@ -368,6 +373,7 @@ class PosterCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.data = None
         self._w, self._h = w, h
+        self._img = None            # 原图留着：宽度变了要重绘
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(theme.SP2)
@@ -389,15 +395,35 @@ class PosterCard(QFrame):
         self.name.setToolTip(item_tooltip(it))
         fetch_async(url, self._got)
 
-    def _got(self, img):
-        if img is None or img.isNull():
+    def set_width(self, w):
+        """按可用宽度重排：推荐位要铺满整行，不能左边五张、右边空一块。"""
+        w = max(132, int(w))
+        h = int(round(w * POSTER_H / float(POSTER_W)))
+        if w == self._w and h == self._h:
             return
+        self._w, self._h = w, h
+        self.pic.setFixedSize(w, h)
+        self.name.setFixedWidth(w)
+        if self._img is not None and not self._img.isNull():
+            self._paint(self._img)
+        else:
+            pm = QPixmap(w, h)
+            pm.fill(QColor("#1b2130"))
+            self.pic.setPixmap(round_pixmap(pm))
+
+    def _paint(self, img):
         pm = QPixmap.fromImage(img).scaled(self._w, self._h,
                                           Qt.KeepAspectRatioByExpanding,
                                           Qt.SmoothTransformation)
         if pm.width() > self._w or pm.height() > self._h:
             pm = pm.copy((pm.width() - self._w) // 2, 0, self._w, self._h)
         self.pic.setPixmap(round_pixmap(pm))
+
+    def _got(self, img):
+        if img is None or img.isNull():
+            return
+        self._img = img
+        self._paint(img)
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.data:
@@ -504,13 +530,13 @@ class HomePage(GlassBackdrop):
 
         row = QHBoxLayout()
         row.setSpacing(theme.SP4)
+        self.rec_row = row
         self.cards = []
         for _ in range(self.REC_N):
             c = PosterCard()
             c.clicked.connect(self.item_chosen.emit)
             row.addWidget(c)
             self.cards.append(c)
-        row.addStretch(1)
         root.addLayout(row)
         root.addSpacing(theme.SECTION_GAP)
 
@@ -540,6 +566,28 @@ class HomePage(GlassBackdrop):
         self.lib_area.setWidget(inner)
         root.addWidget(self.lib_area, 1)
         self.counts_ready.connect(self._apply_counts)
+
+    # ---- 推荐位随宽度自适应 ----
+    def showEvent(self, e):
+        super().showEvent(e)
+        # 首次显示时 resizeEvent 早于卡片 setVisible，宽度会算成 0 个可见卡片；
+        # 这里补一次延迟计算，保证一进首页就是铺满的
+        QTimer.singleShot(0, self._fit_recs)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit_recs()
+
+    def _fit_recs(self):
+        """把可用宽度平分给当前可见的推荐卡，铺满整行（不留右边那块空白）。"""
+        cards = [c for c in getattr(self, "cards", []) if c.isVisible()]
+        if not cards:
+            return
+        avail = self.width() - theme.PAGE_MARGINS[0] - theme.PAGE_MARGINS[2]
+        gap = theme.SP4 * (len(cards) - 1)
+        w = (avail - gap) / float(len(cards))
+        for c in cards:
+            c.set_width(w)
 
     # ---- 媒体库表 ----
     def fill_libs(self, views):
@@ -1676,6 +1724,15 @@ class MainWindow(QMainWindow):
         self.top = top                # 全屏时一起收起来
         tl = QHBoxLayout(top)
         tl.setContentsMargins(theme.PAGE_MARGINS[0], theme.SP3, theme.PAGE_MARGINS[2], theme.SP2)
+        # 侧栏可以收起来（Ctrl+B）：窗口窄的时候把 216px 让给内容
+        self.btn_side = QPushButton("☰")
+        self.btn_side.setObjectName("IconBtn")
+        self.btn_side.setToolTip("收起 / 展开侧栏（Ctrl+B）")
+        self.btn_side.setFixedSize(32, 32)
+        self.btn_side.setCursor(Qt.PointingHandCursor)
+        self.btn_side.clicked.connect(lambda: self.toggle_side())
+        tl.addWidget(self.btn_side)
+        tl.addSpacing(theme.SP2)
         self.lbl_page = QLabel("首页")
         self.lbl_page.setObjectName("PageTitle")
         self.lbl_count = QLabel("")
@@ -1731,8 +1788,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F11"), self, activated=self.toggle_fullscreen)
         QShortcut(QKeySequence("Escape"), self, activated=self.esc_key)
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.edit_search.setFocus())
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.toggle_side())
 
         self.refresh_server_label()
+        if store.get_pref("sidebar_hidden"):
+            self.side.setVisible(False)
         QTimer.singleShot(80, self.start)
 
     # 侧栏固定 216px：减 NavItem 的 margin(10+10) 与 padding(14+14) = 168px 文本宽度
@@ -2092,6 +2152,12 @@ class MainWindow(QMainWindow):
             self.page_player.player.toggle_pause()
             self.page_player.poke()
 
+    def toggle_side(self, show=None):
+        """收起 / 展开侧栏（Ctrl+B）。状态记进 prefs，下次打开还是这样。"""
+        vis = (not self.side.isVisible()) if show is None else bool(show)
+        self.side.setVisible(vis)
+        self.store.set_pref("sidebar_hidden", not vis)
+
     def _sync_chrome(self, full=None):
         """全屏时收起侧栏与顶部标题行（全屏播放就该只剩画面）。
 
@@ -2100,7 +2166,8 @@ class MainWindow(QMainWindow):
         """
         if full is None:
             full = self.isFullScreen()
-        self.side.setVisible(not full)
+        hidden = bool(self.store.get_pref("sidebar_hidden"))
+        self.side.setVisible((not full) and (not hidden))
         self.top.setVisible(not full)
 
     def toggle_fullscreen(self):
