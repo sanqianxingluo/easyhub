@@ -349,12 +349,7 @@ class PosterGrid(QListWidget):
 
 
 # ═══════════════════════ 首页：随机推荐 + 媒体库表 ═══════════════════════
-# 侧栏 / 首页的库类型图标只挑「同一字号下包围盒一样高」的符号：
-# 13px 下 ◆ ■ ● ♪ ▲ 都是 16px 高，而原来用的 ▣ ▤ ▥ ◈ ◉ 只有 13px ——
-# 比别的字形整整小一号，看着就像「有的图标看不清」。换符号前先量一下。
-ICONS = {"movies": "◆", "tvshows": "■", "music": "♪", "livetv": "●",
-         "homevideos": "▲", "books": "■", "boxsets": "◆", "musicvideos": "♪"}
-ICON_FALLBACK = "■"
+# 类型只用来生成副标题文字（KINDS）。不再有图标：字体符号大小不齐，删掉更干净。
 KINDS = {"movies": "电影", "tvshows": "剧集", "music": "音乐", "livetv": "电视直播",
          "homevideos": "家庭视频", "books": "图书", "boxsets": "合集", "musicvideos": "音乐视频"}
 
@@ -422,12 +417,8 @@ class LibTile(QFrame):
         h = QHBoxLayout(self)
         h.setContentsMargins(theme.SP4, theme.SP3, theme.SP4, theme.SP3)
         h.setSpacing(theme.SP3)
-        # 未知类型也给一个和别的图标同字重的方块，别退化成小点（看着像坏了）
-        self.ic = QLabel(ICON_FALLBACK)
-        self.ic.setObjectName("LibIcon")
-        self.ic.setFixedWidth(28)
-        self.ic.setAlignment(Qt.AlignCenter)
-        h.addWidget(self.ic)
+        # 不再放类型图标：副标题已经写着「电影 / 剧集 / 电视直播」，
+        # 再配一个 ◆▣● 的符号纯属重复，而且字体符号大小不齐（侧栏就是因为这个去掉的）
         col = QVBoxLayout()
         col.setSpacing(2)
         self.title = QLabel("")
@@ -445,7 +436,6 @@ class LibTile(QFrame):
     def set_view(self, v):
         self.data = v
         name = v.get("Name", "")
-        self.ic.setText(ICONS.get(v.get("CollectionType"), ICON_FALLBACK))
         self.title.setText(name)
         self.title.setToolTip(name)
         srv = v.get("server") or ""
