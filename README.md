@@ -81,7 +81,9 @@ EasyHub/
 ├─ selftest.py / ui_flow.py / check_home.py            自检脚本（界面 / 首页）
 ├─ libmpv-2.dll (115MB)                                解码内核，必须与程序同目录
 ├─ servers.json                                        服务器配置（在软件里改）
-└─ dist/EasyHub/   ← 打包好的成品：EasyHub.exe + 依赖
+├─ packaging/       发版脚本：make_release.ps1 + easyhub.iss（安装包配置）
+├─ dist/EasyHub/    ← 目录版成品：EasyHub.exe + 依赖
+└─ release/         ← 发版产物：Setup / Portable（不进仓库）
 ```
 
 ## 用打包好的 exe
@@ -93,7 +95,29 @@ EasyHub/
 
 想要单文件版也可以打：`pyinstaller --onefile ...`，但启动时要把 225MB 解压到临时目录，会慢十几秒，不推荐。
 
-自己重新打包：
+发版（一条命令，先改 `src/version.py` 的 `APP_VERSION`）：
+
+```powershell
+.\packaging\make_release.ps1
+```
+
+它会依次做：
+
+1. PyInstaller 打 `dist\EasyHub`（目录版，安装包的载荷）+ `release\EasyHub-Portable-<版本>.exe`（便携单文件，libmpv 打进包里）
+2. 用 Inno Setup 生成 `release\EasyHub-Setup-<版本>.exe`（中文向导 / 按用户装 / 不弹 UAC / 自带卸载）
+3. 算好 SHA256 并写 `release\release-notes.md`（含校验值，可直接粘到 GitHub Release）
+
+前提：
+
+- `python -m pip install pyinstaller`
+- Inno Setup 6，且要有中文语言文件 `Languages\ChineseSimplified.isl`
+  （官方安装包不带中文，从 issrc 仓库的 `Files/Languages/Unofficial/ChineseSimplified.isl` 取一份放进去）
+- `libmpv-2.dll` 放在 `src\` 下，或用 `-LibMpv` 指定（115 MB，不进仓库）
+
+可选参数：`-SkipPortable`（只出目录版+安装包）、`-SkipSetup`（没装 Inno 时）、`-NoClean`、
+`-Python`、`-LibMpv`、`-Iscc`。
+
+只想手动打个目录版跑跑：
 
 ```bat
 python -m PyInstaller --noconfirm --clean --windowed --name EasyHub --onedir main.py

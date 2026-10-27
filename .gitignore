@@ -5,6 +5,10 @@ cache/
 dist/
 build/
 *.spec
+release/
+
+# ── 解码内核（115 MB，自己下，别提交）──
+libmpv-2.dll
 
 # ── 配置与凭据（绝对不提交）──
 servers.json
