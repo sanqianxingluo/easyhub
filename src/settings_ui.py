@@ -91,7 +91,7 @@ class AppearancePage(QWidget):
         self._syncing = False
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(30, 8, 30, 24)
+        v.setContentsMargins(*theme.PAGE_MARGINS)
         v.setSpacing(14)
 
         scroll = QScrollArea()
@@ -120,7 +120,7 @@ class AppearancePage(QWidget):
     def _preset_card(self):
         card = Glass("Glass")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(20, 16, 20, 18)
+        cl.setContentsMargins(*theme.CARD_PAD)
         cl.setSpacing(10)
 
         head = QHBoxLayout()
@@ -155,7 +155,7 @@ class AppearancePage(QWidget):
     def _custom_card(self):
         card = Glass("Glass")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(20, 16, 20, 18)
+        cl.setContentsMargins(*theme.CARD_PAD)
         cl.setSpacing(10)
         cl.addWidget(_title("自定义", 13))
 
@@ -214,7 +214,7 @@ class AppearancePage(QWidget):
         """拿真实控件当预览：它们用的是同一份全局 QSS，换色后自动跟着变。"""
         card = Glass("Glass")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(20, 16, 20, 18)
+        cl.setContentsMargins(*theme.CARD_PAD)
         cl.setSpacing(10)
         cl.addWidget(_title("控件预览", 13))
 
@@ -223,7 +223,7 @@ class AppearancePage(QWidget):
 
         ed = QLineEdit()
         ed.setPlaceholderText("搜索影片 / 剧集…")
-        ed.setFixedWidth(210)
+        ed.setFixedWidth(theme.W_FIELD)
         row.addWidget(ed)
 
         chip = QLabel("动作")

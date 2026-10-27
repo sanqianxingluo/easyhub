@@ -19,8 +19,21 @@ TEXT = "#eef1f7"
 TEXT_DIM = "#9aa3b8"
 TEXT_DIM2 = "#6c7488"
 RATING = "#ffd166"
-OVERVIEW = "#ccd3e2"
 ON_ERROR = "#ff8080"
+
+# ── 设计令牌 ──
+# 风格统一靠这三套：间距、圆角、控件高度。各页面只许引用，不许自己写字面量。
+SP1, SP2, SP3, SP4, SP5, SP6 = 4, 8, 12, 16, 20, 24
+PAGE_MARGINS = (28, 24, 28, 24)      # 页面内容区（左 上 右 下），换页不跳
+SECTION_GAP = 20                     # 区块之间
+TITLE_GAP = 12                       # 区块标题 → 内容
+CARD_PAD = (20, 16, 20, 18)          # 卡片内边距
+R_CARD = 16                          # 大卡片
+R_CTRL = 12                          # 输入框 / 按钮 / 列表格 / 海报
+R_CHIP = 9                           # 标签 / 色块
+W_FIELD = 220                        # 表单里单行控件的统一宽度
+H_CTRL = 36                          # 次要按钮 / 输入框
+H_PRIMARY = 44                       # 主按钮（播放 / 添加服务器）
 
 # 玻璃参数集中放这里，方便统一调
 GLASS_BG = "rgba(255,255,255,0.075)"
@@ -239,23 +252,23 @@ QMainWindow {{ background: {base}; }}
 
 QToolTip {{
     background: rgba(20,24,34,0.96); color: {TEXT};
-    border: 1px solid rgba(255,255,255,0.16); padding: 5px 9px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.16); padding: 5px 9px; border-radius: {R_CHIP}px;
 }}
 
 #Glass {{
     background: {GLASS_BG};
     border: {GLASS_BORDER};
-    border-radius: 16px;
+    border-radius: {R_CARD}px;
 }}
 #GlassDeep {{
     background: rgba(12,15,22,0.62);
     border: {GLASS_BORDER};
-    border-radius: 16px;
+    border-radius: {R_CARD}px;
 }}
 #GlassThin {{
     background: rgba(255,255,255,0.045);
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 12px;
+    border-radius: {R_CTRL}px;
 }}
 
 #Sidebar {{
@@ -269,36 +282,46 @@ QToolTip {{
               letter-spacing: 2px; }}
 
 QPushButton#NavItem {{
-    background: transparent; border: 1px solid transparent; text-align: left;
-    padding: 9px 14px; border-radius: 10px; margin: 1px 10px; color: {TEXT};
+    background: transparent; border: none; border-left: 3px solid transparent;
+    text-align: left; padding: 9px 14px 9px 11px;
+    border-radius: {R_CTRL}px; margin: 1px 10px; color: {TEXT};
 }}
 QPushButton#NavItem:hover {{ background: {GLASS_BG_HOVER}; }}
+/* 选中态：淡色底 + 左侧强调色竖条。不用描边——整块描边在暖色主题下像一块砖 */
 QPushButton#NavItem:checked {{
-    background: {rgba(active, GLASS_ACTIVE_ALPHA)};
-    border: 1px solid {rgba(hi, 0.42)};
+    background: {rgba(active, 0.20)};
+    border-left: 3px solid {a1};
     font-weight: 600;
 }}
 
-#SecTitle {{ font-size: 15px; font-weight: 700; color: {TEXT}; padding: 4px 2px; }}
+/* ── 字号层级：只有这五档 ── */
+#H1, #PageTitle {{ font-size: 20px; font-weight: 700; }}
+#H2, #SecTitle {{ font-size: 15px; font-weight: 700; color: {TEXT};
+                  padding: 4px 2px; }}
+#Body {{ font-size: 13px; }}
+#Caption, #Hint {{ color: {TEXT_DIM}; font-size: 12px; }}
+#Micro, #StatLabel {{ color: {TEXT_DIM2}; font-size: 11px; letter-spacing: 0.6px; }}
+#Icon {{ color: {c["icon"]}; }}
+#StatusOk {{ color: {a1}; font-size: 12px; }}
+#StatusWarn {{ color: {RATING}; font-size: 12px; }}
+
 #RecCard, #LibTile {{ background: transparent; }}
-#RecPic {{ background: rgba(255,255,255,0.05); border-radius: 12px;
+#RecPic {{ background: rgba(255,255,255,0.05); border-radius: {R_CTRL}px;
            border: 1px solid rgba(255,255,255,0.14); }}
 #RecName {{ color: {TEXT}; font-size: 12px; }}
-#LibTile {{ background: {GLASS_BG}; border: {GLASS_BORDER}; border-radius: 12px; }}
+#LibTile {{ background: {GLASS_BG}; border: {GLASS_BORDER}; border-radius: {R_CTRL}px; }}
 #LibTile:hover {{ background: {GLASS_BG_HOVER}; border: {GLASS_BORDER_HI}; }}
 #LibName {{ font-size: 14px; font-weight: 600; }}
-#LibIcon {{ font-size: 19px; color: {c["icon"]}; }}
+#LibIcon {{ font-size: 17px; color: {c["icon"]}; }}
 #LibArea, #LibArea2 {{ background: transparent; border: none; }}
 
 #TopBar {{ background: rgba(10,13,20,0.30);
            border-bottom: 1px solid rgba(255,255,255,0.08); }}
-#PageTitle {{ font-size: 20px; font-weight: 700; }}
-#Hint {{ color: {TEXT_DIM}; font-size: 12px; }}
-#StatLabel {{ color: {TEXT_DIM}; font-size: 11px; }}
 
 QPushButton#Tool {{
     background: {GLASS_BG}; border: {GLASS_BORDER};
-    border-radius: 10px; padding: 7px 15px; color: {TEXT};
+    border-radius: {R_CTRL}px; padding: 0 16px; min-height: {H_CTRL}px;
+    color: {TEXT};
 }}
 QPushButton#Tool:hover {{ background: {GLASS_BG_HOVER}; border: {GLASS_BORDER_HI}; }}
 QPushButton#Tool:pressed {{ background: rgba(255,255,255,0.20); }}
@@ -306,7 +329,8 @@ QPushButton#Tool:disabled {{ color: {TEXT_DIM2}; border-color: rgba(255,255,255,
 
 QPushButton#Accent {{
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {a1}, stop:1 {a2});
-    border: none; border-radius: 11px; padding: 11px 26px;
+    border: none; border-radius: {R_CTRL}px; padding: 0 24px;
+    min-height: {H_PRIMARY}px;
     color: {on_accent}; font-weight: 700; font-size: 14px;
 }}
 QPushButton#Accent:hover {{
@@ -314,21 +338,22 @@ QPushButton#Accent:hover {{
 }}
 QPushButton#Play {{
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {a1}, stop:1 {a2});
-    border: none; border-radius: 21px; min-width: 42px; min-height: 42px;
+    border: none; border-radius: {H_PRIMARY // 2}px;
+    min-width: {H_PRIMARY}px; min-height: {H_PRIMARY}px;
     font-size: 16px; color: {on_accent};
 }}
 QPushButton#Play:hover {{ background: {a1_hi}; }}
 
 QLineEdit {{
     background: rgba(255,255,255,0.07); border: {GLASS_BORDER};
-    border-radius: 10px; padding: 8px 13px; color: {TEXT};
-    selection-background-color: {a1};
+    border-radius: {R_CTRL}px; padding: 0 13px; min-height: {H_CTRL}px;
+    color: {TEXT}; selection-background-color: {a1};
 }}
 QLineEdit:focus {{ border: 1px solid {rgba(hi, 0.55)};
                    background: rgba(255,255,255,0.10); }}
 
 QListView#Grid {{ background: transparent; border: none; outline: none; }}
-QListView#Grid::item {{ color: {TEXT}; border-radius: 14px; padding: 4px; }}
+QListView#Grid::item {{ color: {TEXT}; border-radius: {R_CTRL}px; padding: 4px; }}
 QListView#Grid::item:hover {{ background: {GLASS_BG_HOVER}; }}
 QListView#Grid::item:selected {{ background: {rgba(active, GLASS_ACTIVE_ALPHA)};
                                  border: 1px solid {rgba(hi, 0.5)}; }}
@@ -372,19 +397,19 @@ QMenu::item {{ padding: 8px 26px 8px 16px; border-radius: 8px; color: {TEXT}; }}
 QMenu::item:selected {{ background: {rgba(active, GLASS_ACTIVE_ALPHA)}; }}
 QMenu::separator {{ height: 1px; background: rgba(255,255,255,0.12); margin: 5px 10px; }}
 
-#DetailTitle {{ font-size: 34px; font-weight: 800; }}
+#DetailTitle {{ font-size: 30px; font-weight: 800; }}
 #DetailMeta {{ color: {TEXT_DIM}; font-size: 13px; }}
 #Chip {{
     background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 9px; padding: 4px 12px; color: {TEXT}; font-size: 12px;
+    border-radius: {R_CHIP}px; padding: 4px 12px; color: {TEXT}; font-size: 12px;
 }}
 #SectionTitle {{ font-size: 15px; font-weight: 700; }}
-#Overview {{ color: {OVERVIEW}; font-size: 13px; }}
+#Overview {{ color: {TEXT_DIM}; font-size: 13px; }}
 #Rating {{ color: {RATING}; font-size: 14px; font-weight: 700; }}
 
 QPushButton#EpItem {{
     background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 11px; text-align: left; padding: 10px 14px; color: {TEXT};
+    border-radius: {R_CTRL}px; text-align: left; padding: 10px 14px; color: {TEXT};
 }}
 QPushButton#EpItem:hover {{ background: {GLASS_BG_HOVER}; border: {GLASS_BORDER_HI}; }}
 QPushButton#EpItem:checked {{ background: {rgba(active, GLASS_ACTIVE_ALPHA)};
@@ -392,7 +417,7 @@ QPushButton#EpItem:checked {{ background: {rgba(active, GLASS_ACTIVE_ALPHA)};
 
 QComboBox {{
     background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.13);
-    border-radius: 10px; padding: 7px 12px; color: {TEXT};
+    border-radius: {R_CTRL}px; padding: 0 12px; min-height: {H_CTRL}px; color: {TEXT};
 }}
 QComboBox:hover {{ background: rgba(255,255,255,0.12); }}
 QComboBox::drop-down {{ border: none; width: 26px; }}
@@ -401,7 +426,7 @@ QComboBox::down-arrow {{ image: none; width: 0; height: 0; margin-right: 9px;
     border-top: 5px solid {TEXT_DIM}; }}
 QComboBox QAbstractItemView {{
     background: rgba(18,22,32,0.97); border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 10px; padding: 6px; color: {TEXT}; outline: none;
+    border-radius: {R_CTRL}px; padding: 6px; color: {TEXT}; outline: none;
     selection-background-color: {rgba(active, 0.35)};
 }}
 QScrollArea {{ background: transparent; border: none; }}

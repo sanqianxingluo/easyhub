@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
 from servers import (ServerConf, Endpoint, ServerStore, current_ssid, on_wifi,
                      wifi_present)
 from library import MultiEmby
+import theme
 
 
 def _title(text, size=17):
@@ -303,8 +304,8 @@ class ServerPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self)
-        v.setContentsMargins(30, 8, 30, 24)
-        v.setSpacing(14)
+        v.setContentsMargins(*theme.PAGE_MARGINS)
+        v.setSpacing(theme.SECTION_GAP)
 
         head = QHBoxLayout()
         head.addWidget(_title("已接入的服务器"))
@@ -351,7 +352,7 @@ class ServerPage(QWidget):
             adapters = []
         card = Glass("Glass")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setContentsMargins(*theme.CARD_PAD)
         cl.setSpacing(9)
         cl.addWidget(_title("解码", 13))
 
@@ -365,7 +366,7 @@ class ServerPage(QWidget):
         cur = store.get_pref("decode", "auto")
         idx = max(0, cb.findData(cur))
         cb.setCurrentIndex(idx)
-        cb.setFixedWidth(210)
+        cb.setFixedWidth(theme.W_FIELD)
         row.addWidget(cb)
 
         row.addWidget(QLabel("适配器"))
@@ -375,8 +376,10 @@ class ServerPage(QWidget):
             acb.addItem(a, a)
         ai = max(0, acb.findData(store.get_pref("adapter", "") or ""))
         acb.setCurrentIndex(ai)
-        acb.setMinimumWidth(280)
-        row.addWidget(acb, 1)
+        acb.setMinimumWidth(theme.W_FIELD * 1.4)
+        # 不给 stretch：下拉框拉满整行会显得很怪，两个字段宽度接近才像一套表单
+        row.addWidget(acb)
+        row.addStretch(1)
         cl.addLayout(row)
 
         hint = QLabel("自动检测＝播放时逐个试适配器，用 mpv 的 hwdec-current 实测确认，"
@@ -410,7 +413,7 @@ class ServerPage(QWidget):
     def _card(self, conf, multi):
         card = Glass("Glass")
         cl = QHBoxLayout(card)
-        cl.setContentsMargins(20, 16, 20, 16)
+        cl.setContentsMargins(*theme.CARD_PAD)
         cl.setSpacing(16)
 
         left = QVBoxLayout()
@@ -464,17 +467,18 @@ class ServerPage(QWidget):
 
     @staticmethod
     def _status(conf, multi):
+        # 状态用「小圆点 + 文字」，不用 emoji ✅：全应用只有这里冒绿光，跟配色打架
         if not conf.enabled:
-            l = QLabel("已停用")
+            l = QLabel("●  已停用")
             l.setObjectName("Hint")
             return l
         if multi is None or conf.id not in multi.clients:
-            l = QLabel("未连接")
-            l.setObjectName("Hint")
+            l = QLabel("●  未连接")
+            l.setObjectName("StatusWarn")
             return l
         base = multi.bases.get(conf.id, "?")
         which = "内网" if conf.lan.set and base == conf.lan.url else (
             "外网" if conf.wan.set and base == conf.wan.url else "直连")
-        l = QLabel("✅ 已连接（%s · %s）" % (which, base))
-        l.setObjectName("StatLabel")
+        l = QLabel("●  已连接 · %s · %s" % (which, base))
+        l.setObjectName("StatusOk")
         return l

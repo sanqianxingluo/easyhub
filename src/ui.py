@@ -145,6 +145,28 @@ def blur_image(img, radius=26, small=520):
     return out
 
 
+def round_pixmap(pm, radius=None):
+    """把海报切成圆角。
+
+    首页推荐卡（QLabel 画）和媒体库海报墙（QListWidget 的图标）是两套实现，
+    但外观必须一致 —— 圆角都走这里，别一边圆一边方。
+    """
+    from PySide6.QtGui import QPainterPath
+    radius = theme.R_CTRL if radius is None else radius
+    if pm is None or pm.isNull():
+        return pm
+    out = QPixmap(pm.size())
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    path = QPainterPath()
+    path.addRoundedRect(0, 0, pm.width(), pm.height(), radius, radius)
+    p.setClipPath(path)
+    p.drawPixmap(0, 0, pm)
+    p.end()
+    return out
+
+
 # ═══════════════════════ 玻璃背景容器 ═══════════════════════
 class GlassBackdrop(QWidget):
     """背景：模糊图片（可选）+ 暗色渐变叠加，保证上层文字可读。"""
@@ -305,11 +327,11 @@ class PosterGrid(QListWidget):
         it.setText("%s\n%s" % (title, line2))
         it.setData(Qt.UserRole, data)
         it.setToolTip(item_tooltip(data))
-        it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
         it.setSizeHint(QSize(POSTER_W + 22, POSTER_H + 62))
         ph = QPixmap(POSTER_W, POSTER_H)
         ph.fill(QColor("#1b2130"))
-        it.setIcon(QIcon(ph))
+        it.setIcon(QIcon(round_pixmap(ph)))
         self.addItem(it)
         self._items[key] = it
         fetch_async(url, lambda img, k=key: self._poster(k, img))
@@ -323,7 +345,7 @@ class PosterGrid(QListWidget):
                                           Qt.SmoothTransformation)
         if pm.width() > POSTER_W or pm.height() > POSTER_H:
             pm = pm.copy((pm.width() - POSTER_W) // 2, 0, POSTER_W, POSTER_H)
-        it.setIcon(QIcon(pm))
+        it.setIcon(QIcon(round_pixmap(pm)))
 
 
 # ═══════════════════════ 首页：随机推荐 + 媒体库表 ═══════════════════════
@@ -334,10 +356,14 @@ KINDS = {"movies": "电影", "tvshows": "剧集", "music": "音乐", "livetv": "
 
 
 class PosterCard(QFrame):
-    """推荐位的一张海报卡（点进详情）。"""
+    """推荐位的一张海报卡（点进详情）。
+
+    尺寸与媒体库海报墙一致（POSTER_W × POSTER_H）、圆角走同一个 round_pixmap ——
+    首页和库页看到的「同一部片」长得一模一样。
+    """
     clicked = Signal(dict)
 
-    def __init__(self, w=158, h=237, parent=None):
+    def __init__(self, w=POSTER_W, h=POSTER_H, parent=None):
         super().__init__(parent)
         self.setObjectName("RecCard")
         self.setCursor(Qt.PointingHandCursor)
@@ -345,7 +371,7 @@ class PosterCard(QFrame):
         self._w, self._h = w, h
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(7)
+        v.setSpacing(theme.SP2)
         self.pic = QLabel()
         self.pic.setFixedSize(w, h)
         self.pic.setObjectName("RecPic")
@@ -354,7 +380,7 @@ class PosterCard(QFrame):
         self.name = QLabel("")
         self.name.setObjectName("RecName")
         self.name.setFixedWidth(w)
-        self.name.setAlignment(Qt.AlignHCenter)
+        self.name.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         v.addWidget(self.name)
 
     def set_item(self, it, url):
@@ -372,7 +398,7 @@ class PosterCard(QFrame):
                                           Qt.SmoothTransformation)
         if pm.width() > self._w or pm.height() > self._h:
             pm = pm.copy((pm.width() - self._w) // 2, 0, self._w, self._h)
-        self.pic.setPixmap(pm)
+        self.pic.setPixmap(round_pixmap(pm))
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.data:
@@ -390,9 +416,10 @@ class LibTile(QFrame):
         self.setMinimumHeight(74)
         self.data = None
         h = QHBoxLayout(self)
-        h.setContentsMargins(16, 11, 14, 11)
-        h.setSpacing(13)
-        self.ic = QLabel("▪")
+        h.setContentsMargins(theme.SP4, theme.SP3, theme.SP4, theme.SP3)
+        h.setSpacing(theme.SP3)
+        # 未知类型也给一个和别的图标同字重的方块，别退化成小点（看着像坏了）
+        self.ic = QLabel("▣")
         self.ic.setObjectName("LibIcon")
         self.ic.setFixedWidth(28)
         self.ic.setAlignment(Qt.AlignCenter)
@@ -414,7 +441,7 @@ class LibTile(QFrame):
     def set_view(self, v):
         self.data = v
         name = v.get("Name", "")
-        self.ic.setText(ICONS.get(v.get("CollectionType"), "▪"))
+        self.ic.setText(ICONS.get(v.get("CollectionType"), "▣"))
         self.title.setText(name)
         self.title.setToolTip(name)
         srv = v.get("server") or ""
@@ -462,12 +489,12 @@ class HomePage(GlassBackdrop):
         self.emby = None
         self.tiles = {}
         root = QVBoxLayout(self)
-        root.setContentsMargins(30, 10, 30, 18)
+        root.setContentsMargins(*theme.PAGE_MARGINS)
         root.setSpacing(0)
 
         # ── 随机推荐 ──
         h1 = QHBoxLayout()
-        h1.setSpacing(10)
+        h1.setSpacing(theme.SP2)
         t1 = QLabel("随机推荐")
         t1.setObjectName("SecTitle")
         self.btn_again = QPushButton("↻   换一批")
@@ -478,10 +505,10 @@ class HomePage(GlassBackdrop):
         h1.addStretch(1)
         h1.addWidget(self.btn_again)
         root.addLayout(h1)
-        root.addSpacing(10)
+        root.addSpacing(theme.TITLE_GAP)
 
         row = QHBoxLayout()
-        row.setSpacing(16)
+        row.setSpacing(theme.SP4)
         self.cards = []
         for _ in range(self.REC_N):
             c = PosterCard()
@@ -490,19 +517,19 @@ class HomePage(GlassBackdrop):
             self.cards.append(c)
         row.addStretch(1)
         root.addLayout(row)
-        root.addSpacing(20)
+        root.addSpacing(theme.SECTION_GAP)
 
         # ── 媒体库表 ──
         h2 = QHBoxLayout()
         t2 = QLabel("媒体库")
         t2.setObjectName("SecTitle")
         self.lbl_libs = QLabel("")
-        self.lbl_libs.setObjectName("Hint")
+        self.lbl_libs.setObjectName("Caption")
         h2.addWidget(t2)
         h2.addStretch(1)
         h2.addWidget(self.lbl_libs)
         root.addLayout(h2)
-        root.addSpacing(8)
+        root.addSpacing(theme.TITLE_GAP)
 
         self.lib_area = QScrollArea()
         self.lib_area.setObjectName("LibArea2")
@@ -514,7 +541,7 @@ class HomePage(GlassBackdrop):
         self.lib_grid = QGridLayout(inner)
         # 右边留 14px：垂直滚动条是覆盖式画的，不留位卡片文字会被压在滚动条下面（看着像糊了）
         self.lib_grid.setContentsMargins(0, 0, 14, 0)
-        self.lib_grid.setSpacing(10)
+        self.lib_grid.setSpacing(theme.SP3)
         self.lib_area.setWidget(inner)
         root.addWidget(self.lib_area, 1)
         self.counts_ready.connect(self._apply_counts)
@@ -594,7 +621,8 @@ class BrowsePage(GlassBackdrop):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self)
-        v.setContentsMargins(0, 0, 0, 0)
+        v.setContentsMargins(*theme.PAGE_MARGINS)
+        v.setSpacing(0)
         self.grid = PosterGrid()
         self.grid.activated_item.connect(self.item_chosen.emit)
         v.addWidget(self.grid)
@@ -616,18 +644,8 @@ class DetailPage(GlassBackdrop):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── 顶部返回条 ──
-        top = QWidget()
-        tl = QHBoxLayout(top)
-        tl.setContentsMargins(18, 14, 18, 6)
-        self.btn_back = QPushButton("←  返回")
-        self.btn_back.setObjectName("Tool")
-        self.btn_back.clicked.connect(self.back_requested.emit)
-        tl.addWidget(self.btn_back)
-        tl.addStretch(1)
-        root.addWidget(top)
-
         # ── 可滚动内容 ──
+        # 返回按钮放在内容首行：不然详情页会多出一条「第二条标题栏」，和别的页面对不齐
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
@@ -637,18 +655,26 @@ class DetailPage(GlassBackdrop):
         content = QWidget()
         self.scroll.setWidget(content)
         cv = QVBoxLayout(content)
-        cv.setContentsMargins(34, 6, 34, 34)
-        cv.setSpacing(20)
+        cv.setContentsMargins(*theme.PAGE_MARGINS)
+        cv.setSpacing(theme.SECTION_GAP)
+
+        back_row = QHBoxLayout()
+        self.btn_back = QPushButton("←  返回")
+        self.btn_back.setObjectName("Tool")
+        self.btn_back.clicked.connect(self.back_requested.emit)
+        back_row.addWidget(self.btn_back)
+        back_row.addStretch(1)
+        cv.addLayout(back_row)
 
         # 主信息行：海报 + 文字
         hero = QHBoxLayout()
-        hero.setSpacing(26)
+        hero.setSpacing(theme.SP6)
 
         self.poster = QLabel()
         self.poster.setFixedSize(232, 348)
         self.poster.setStyleSheet(
-            "background: rgba(255,255,255,0.05); border-radius: 14px;"
-            "border: 1px solid rgba(255,255,255,0.16);")
+            "background: rgba(255,255,255,0.05); border-radius: %dpx;"
+            "border: 1px solid rgba(255,255,255,0.16);" % theme.R_CTRL)
         self.poster.setScaledContents(False)
         self.poster.setAlignment(Qt.AlignCenter)
         hero.addWidget(self.poster, 0, Qt.AlignTop)
@@ -678,41 +704,50 @@ class DetailPage(GlassBackdrop):
         info.addSpacing(6)
 
         btns = QHBoxLayout()
-        btns.setSpacing(10)
+        btns.setSpacing(theme.SP2)
         self.btn_play = QPushButton("▶  播放")
         self.btn_play.setObjectName("Accent")
         self.btn_play.clicked.connect(lambda: self._play(True))
         self.btn_restart = QPushButton("从头播放")
         self.btn_restart.setObjectName("Tool")
         self.btn_restart.clicked.connect(lambda: self._play(False))
+        # 同一排的两个按钮必须一样高，不然「播放」比「从头播放」高出一头
+        self.btn_restart.setMinimumHeight(theme.H_PRIMARY)
         btns.addWidget(self.btn_play)
         btns.addWidget(self.btn_restart)
         btns.addStretch(1)
         info.addLayout(btns)
 
         info.addStretch(1)
-        hero.addLayout(info, 1)
-        cv.addLayout(hero)
+        # 外面套一层设最小宽度：不套的话整列被「最宽的那个子控件」压扁，
+        # 类型标签（动作 / 惊悚 / 冒险）会挤成一片字糊在一起
+        info_host = QWidget()
+        info_host.setLayout(info)
+        info_host.setMinimumWidth(320)
+        hero.addWidget(info_host, 0)
 
-        # 简介
+        # 简介卡放在主信息行右侧：不然宽屏上标题右边空一大块，看着像没排完版
         self.card_over = Glass("Glass")
+        self.card_over.setMinimumWidth(360)
         ov = QVBoxLayout(self.card_over)
-        ov.setContentsMargins(20, 16, 20, 18)
-        ov.setSpacing(8)
+        ov.setContentsMargins(*theme.CARD_PAD)
+        ov.setSpacing(theme.SP2)
         t1 = QLabel("简介")
         t1.setObjectName("SectionTitle")
         ov.addWidget(t1)
         self.lbl_overview = QLabel()
         self.lbl_overview.setObjectName("Overview")
         self.lbl_overview.setWordWrap(True)
-        ov.addWidget(self.lbl_overview)
-        cv.addWidget(self.card_over)
+        ov.addWidget(self.lbl_overview, 1)
+        hero.addWidget(self.card_over, 1, Qt.AlignTop)
+
+        cv.addLayout(hero)
 
         # 媒体信息
         self.card_media = Glass("Glass")
         mv = QVBoxLayout(self.card_media)
-        mv.setContentsMargins(20, 16, 20, 18)
-        mv.setSpacing(8)
+        mv.setContentsMargins(*theme.CARD_PAD)
+        mv.setSpacing(theme.SP2)
         t2 = QLabel("媒体信息")
         t2.setObjectName("SectionTitle")
         mv.addWidget(t2)
@@ -725,7 +760,7 @@ class DetailPage(GlassBackdrop):
         # 选集（剧集用）
         self.card_eps = Glass("Glass")
         ev = QVBoxLayout(self.card_eps)
-        ev.setContentsMargins(20, 16, 20, 18)
+        ev.setContentsMargins(*theme.CARD_PAD)
         ev.setSpacing(10)
         head = QHBoxLayout()
         t3 = QLabel("选集")
@@ -763,15 +798,22 @@ class DetailPage(GlassBackdrop):
         self.lbl_title.setText(d.get("Name", item.get("Name", "")))
         self.lbl_sub.setText(self._meta_line(d))
 
-        # 类型标签
+        # 类型标签：最多 3 个 + 「+N」。全放出来在窄列里会被压扁到字叠字
         while self.chips_row.count():
             w = self.chips_row.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        for g in (d.get("Genres") or [])[:6]:
+        genres = [g for g in (d.get("Genres") or []) if g]
+        for g in genres[:3]:
             c = chip(g)
             if c:
                 self.chips_row.addWidget(c)
+        if len(genres) > 3:
+            more = chip("+%d" % (len(genres) - 3))
+            if more:
+                more.setObjectName("Micro")
+                more.setToolTip(" / ".join(genres[3:]))
+                self.chips_row.addWidget(more)
         self.chips_row.addStretch(1)
 
         cr = d.get("CommunityRating")
@@ -1636,7 +1678,7 @@ class MainWindow(QMainWindow):
         top.setObjectName("TopBar")
         self.top = top                # 全屏时一起收起来
         tl = QHBoxLayout(top)
-        tl.setContentsMargins(20, 13, 20, 11)
+        tl.setContentsMargins(theme.PAGE_MARGINS[0], theme.SP3, theme.PAGE_MARGINS[2], theme.SP2)
         self.lbl_page = QLabel("首页")
         self.lbl_page.setObjectName("PageTitle")
         self.lbl_count = QLabel("")
@@ -1906,7 +1948,7 @@ class MainWindow(QMainWindow):
             items = self.emby.view_items(view, 500, types)
             for it in items:
                 self._add(it)
-            self.lbl_count.setText("共 %d 项   ·   %s" % (len(items), view.get("server") or ""))
+            self.lbl_count.setText("共 %d 项 · %s" % (len(items), view.get("server") or ""))
             # 用库内第一部片的背景图当页面模糊底
             pick = None
             for it in items[:6]:
