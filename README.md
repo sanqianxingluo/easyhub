@@ -5,11 +5,11 @@ Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit /
 
 ## 下载
 
-最新版本：**[v1.1.1](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.1.1)**
+最新版本：**[v1.2.0](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.2.0)**
 
-- `EasyHub-Setup-1.1.1.exe`（66 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC
+- `EasyHub-Setup-1.2.0.exe`（66 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC
   - **自带卸载**：开始菜单里有「卸载 EasyHub」，也可以在「设置 → 应用」里卸
-- `EasyHub-Portable-1.1.1.exe`（91 MB）—— 便携单文件，双击即用
+- `EasyHub-Portable-1.2.0.exe`（91 MB）—— 便携单文件，双击即用
   - 配置（`servers.json`、`cache\`）就写在 **exe 旁边**，整个文件夹拷走即带走；
     放在不可写的目录（如 `Program Files`）时会自动退回 `%APPDATA%\EasyHub`
 
