@@ -12,7 +12,7 @@ from setup_ui import WelcomePage, ServerPage, ServerDialog
 from settings_ui import AppearancePage, SettingsPage
 from version import APP_VERSION
 from widgets import fetch_async, app_icon
-from frame import TitleBar, hit_test
+from frame import TitleBar, hit_test, mark_icon
 from poster import item_title
 from page_home import HomePage
 from page_browse import BrowsePage
@@ -34,7 +34,7 @@ class MainWindow(QMainWindow):
         # 原生标题栏整条不要（配色/字重跟玻璃皮肤对不上），换成自绘标题条；
         # 拖动与边缘缩放分别由 TitleBar（startSystemMove）和 WM_NCHITTEST 负责。
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.setWindowIcon(app_icon())
+        self.setWindowIcon(mark_icon(256))
 
         self.gpu_all = list_adapters()
         # 初始用「上次探测成功记住的适配器」，没有就先用第一个（最像真实 GPU 的），
@@ -320,6 +320,11 @@ class MainWindow(QMainWindow):
         for p in (self.page_welcome, self.page_settings,
                   self.page_home, self.page_browse, self.page_detail):
             p.update()
+        try:
+            self.titlebar.update()
+            self.setWindowIcon(mark_icon(256))
+        except Exception:
+            pass
 
     def add_server(self):
         dlg = ServerDialog(None, self)

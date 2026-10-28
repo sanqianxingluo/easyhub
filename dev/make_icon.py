@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """生成 EasyHub 图标：艺术体黑色 M + 红色描边。
 
 产物（提交进仓库）：
@@ -79,6 +79,16 @@ def render(size=MASTER, family=FONT_FAMILY, weight=FONT_WEIGHT,
         p.setBrush(QColor(PLATE))
         p.drawRoundedRect(QRectF(0, 0, size, size).adjusted(0, 0, -1, -1),
                           size * 0.22, size * 0.22)
+
+    # 文件图标没法跟主题换色，所以用「黑字 + 红描边 + 极淡白晕」：
+    # 浅色桌面上白晕看不见、黑字清楚；深色任务栏上白晕把轮廓托出来。
+    halo = QPen(QColor(255, 255, 255, 150))
+    halo.setWidthF(size * max(outline * 2.6, 0.030))
+    halo.setJoinStyle(Qt.RoundJoin)
+    halo.setCapStyle(Qt.RoundCap)
+    p.setPen(halo)
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(letter_path(size, family, weight))
 
     pen = QPen(QColor(EDGE))
     pen.setWidthF(size * outline)

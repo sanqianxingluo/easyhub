@@ -470,6 +470,15 @@ QSlider::groove:vertical {{ width: 4px; background: {fg(0.20)}; border-radius: 2
 QSlider::handle:vertical {{ background: #ffffff; height: 14px; width: 14px; margin: 0 -6px;
     border: 1px solid transparent; border-radius: 8px; }}
 
+/* 更新下载进度条 */
+QProgressBar {{
+    background: {fg(0.10)}; border: none; border-radius: 4px;
+}}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {a1}, stop:1 {a2});
+    border-radius: 4px;
+}}
+
 #TimeLabel {{ color: {ink}; font-size: 13px; }}
 
 QMenu {{

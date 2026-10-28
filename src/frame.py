@@ -14,7 +14,8 @@ import ctypes
 from ctypes import wintypes
 
 from PySide6.QtCore import Qt, QPoint, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import (QColor, QFont, QIcon, QPainter, QPainterPath, QPen,
+                           QPixmap, QTransform)
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                                QWidget, QFrame)
 
@@ -26,6 +27,77 @@ BORDER = 6            # 边缘拖拽热区（px）
 WM_NCHITTEST = 0x0084
 HTLEFT, HTRIGHT, HTTOP, HTBOTTOM = 10, 11, 12, 15
 HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT = 13, 14, 16, 17
+
+
+# ═══════════════════════ 品牌标记（黑/白 M + 红描边） ═══════════════════════
+# 图标不能用「一块黑字 + 浅底板」那种做法：底板等于一块白方块，丑。
+# 所以这里按主题换 M 的填充色 —— 深色主题用近白、浅色主题用近黑，
+# 红描边两边都压得住，透明底也能在任意背景上看清。
+MARK_FILL_DARK = "#f3f5fa"     # 深色主题下的字色
+MARK_FILL_LIGHT = "#12151c"    # 浅色主题下的字色
+MARK_EDGE = "#d81f38"          # 红描边（不随主题变）
+
+
+def _mark_path(size):
+    """把 Georgia 粗斜体 M 转成铺满画布的路径（图标和标题条共用）。"""
+    f = QFont("Georgia")
+    f.setStyleHint(QFont.Serif)
+    f.setItalic(True)
+    f.setWeight(QFont.Black)
+    f.setPixelSize(int(size * 1.4))
+    path = QPainterPath()
+    path.addText(0, 0, f, "M")
+    br = path.boundingRect()
+    if br.width() <= 0 or br.height() <= 0:
+        return QPainterPath()
+    k = (size * 0.84) / br.width()
+    path = QTransform().scale(k, k).map(path)
+    br = path.boundingRect()
+    return QTransform().translate((size - br.width()) / 2 - br.left(),
+                                  (size - br.height()) / 2 - br.top()).map(path)
+
+
+def paint_mark(p, size, palette=None, fill=None):
+    """画标记：红描边 + 主题适配的填充。"""
+    pal = palette or theme.current()
+    light = (pal.get("mode") or "dark") == "light"
+    if fill is None:
+        fill = QColor(MARK_FILL_LIGHT if light else MARK_FILL_DARK)
+    path = _mark_path(size)
+    if path.isEmpty():
+        return
+    pen = QPen(QColor(MARK_EDGE))
+    pen.setWidthF(size * 0.020)
+    pen.setJoinStyle(Qt.RoundJoin)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.setBrush(fill)
+    p.drawPath(path)
+
+
+class Mark(QWidget):
+    """标题条左边那个小标记（跟着主题变，切配色后 update 一下就行）。"""
+
+    def __init__(self, size=20, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        paint_mark(p, min(self.width(), self.height()))
+
+
+def mark_icon(size=256, palette=None):
+    """窗口 / 任务栏图标：透明底 + 主题字色 M + 红描边。"""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    paint_mark(p, size, palette)
+    p.end()
+    return QIcon(pm)
 
 
 # ═══════════════════════ 窗口按钮 ═══════════════════════
@@ -137,6 +209,10 @@ class TitleBar(QWidget):
             pic.setFixedSize(18, 18)
             pic.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             h.addWidget(pic)
+        else:
+            # 没传图标就画一个跟着主题走的标记（深色主题浅字、浅色主题深字）
+            self.mark = Mark(16 if dialog else 20)
+            h.addWidget(self.mark)
 
         self.lbl = QLabel(title)
         self.lbl.setObjectName("TitleBarTitle")

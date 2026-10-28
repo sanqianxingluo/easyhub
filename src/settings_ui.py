@@ -7,29 +7,32 @@
 选中态、图标色、对话框底色…）全部派生，所以任何配色都不会出现
 「按钮亮、描边还是蓝的」这种不配套的情况。
 """
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, Signal, QThread, QUrl
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QFrame, QGridLayout, QScrollArea, QColorDialog,
                                QSizePolicy, QButtonGroup, QLineEdit, QCheckBox, QSlider,
-                               QStackedWidget)
+                               QStackedWidget, QProgressBar, QMessageBox)
 
 import theme
+import updater
 from paths import data_path
 from setup_ui import Glass, _title
+from version import APP_VERSION
 
 
-# ═══════════════════════ 设置页（服务器 / 外观） ═══════════════════════
+# ═══════════════════════ 设置页（服务器 / 外观 / 关于） ═══════════════════════
 class SettingsPage(QWidget):
-    """设置容器：把「服务器」和「外观」收进来。
+    """设置容器：把「服务器」「外观」「关于」收进来。
 
     主界面侧栏只留一个「设置」入口 —— 服务器地址这类东西不该占着主界面。
     """
 
-    def __init__(self, servers_page, appearance_page, parent=None):
+    def __init__(self, servers_page, appearance_page, about_page=None, parent=None):
         super().__init__(parent)
         self.servers_page = servers_page
         self.appearance_page = appearance_page
+        self.about_page = about_page or AboutPage()
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -43,8 +46,9 @@ class SettingsPage(QWidget):
 
         self.btn_servers = QPushButton("服务器")
         self.btn_appearance = QPushButton("外观")
+        self.btn_about = QPushButton("关于")
         self._group = QButtonGroup(self)
-        for b in (self.btn_servers, self.btn_appearance):
+        for b in (self.btn_servers, self.btn_appearance, self.btn_about):
             b.setObjectName("Tab")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
@@ -56,10 +60,12 @@ class SettingsPage(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(servers_page)
         self.stack.addWidget(appearance_page)
+        self.stack.addWidget(self.about_page)
         v.addWidget(self.stack, 1)
 
         self.btn_servers.clicked.connect(lambda: self.show_tab("servers"))
         self.btn_appearance.clicked.connect(lambda: self.show_tab("appearance"))
+        self.btn_about.clicked.connect(lambda: self.show_tab("about"))
         self.show_tab("servers")
 
     def show_tab(self, which="servers"):
@@ -68,12 +74,21 @@ class SettingsPage(QWidget):
             self.stack.setCurrentWidget(self.appearance_page)
             self.btn_appearance.setChecked(True)
             return "appearance"
+        if which == "about":
+            self.stack.setCurrentWidget(self.about_page)
+            self.btn_about.setChecked(True)
+            return "about"
         self.stack.setCurrentWidget(self.servers_page)
         self.btn_servers.setChecked(True)
         return "servers"
 
     def current_tab(self):
-        return "appearance" if self.stack.currentWidget() is self.appearance_page else "servers"
+        w = self.stack.currentWidget()
+        if w is self.appearance_page:
+            return "appearance"
+        if w is self.about_page:
+            return "about"
+        return "servers"
 
 
 # ═══════════════════════ 配色格子 ═══════════════════════
@@ -393,3 +408,187 @@ class AppearancePage(QWidget):
         self.bar.set_palette(p)
         self.lbl_cur.setText("当前：%s%s" % (p["name"] if matched else "自定义",
                                             "（浅色）" if is_light else ""))
+
+# ═══════════════════════ 关于 / 更新 ═══════════════════════
+class _Worker(QThread):
+    """后台跑网络任务（检查 / 下载），别把界面卡住。"""
+
+    ok = Signal(object)
+    err = Signal(str)
+    progress = Signal(int, int)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self.fn = fn
+
+    def run(self):
+        try:
+            self.ok.emit(self.fn(self.progress.emit))
+        except Exception as e:
+            self.err.emit("%s: %s" % (type(e).__name__, e))
+
+
+class AboutPage(QWidget):
+    """关于：版本号、检查更新、下载进度、打开发布页。
+
+    更新流程（见 updater.py）：检查 → 询问 → 下载 → 再询问 → 拉起更新脚本并退出。
+    任何一步失败都弹窗，并把原始异常打在弹窗里（用户贴过来就能定位）。
+    """
+
+    MODE_TEXT = {"folder": "文件夹版 / 安装版", "single": "单文件便携版", "source": "源码运行"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._worker = None
+        self._tag = ""
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(theme.PAGE_MARGINS[0], theme.SP3,
+                             theme.PAGE_MARGINS[2], theme.PAGE_MARGINS[3])
+        v.setSpacing(14)
+
+        # ── 版本信息 ──
+        info = Glass("Glass")
+        il = QVBoxLayout(info)
+        il.setContentsMargins(*theme.CARD_PAD)
+        il.setSpacing(8)
+        il.addWidget(_title("EasyHub %s" % APP_VERSION))
+        mode = self.MODE_TEXT.get(updater.install_mode(), "未知")
+        lab = QLabel("运行方式：%s\n数据目录：%s" % (mode, updater.paths.root_dir()))
+        lab.setObjectName("Hint")
+        lab.setWordWrap(True)
+        lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        il.addWidget(lab)
+        v.addWidget(info)
+
+        # ── 更新 ──
+        up = Glass("Glass")
+        ul = QVBoxLayout(up)
+        ul.setContentsMargins(*theme.CARD_PAD)
+        ul.setSpacing(10)
+        ul.addWidget(_title("检查更新", 15))
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.btn_check = QPushButton("检查更新")
+        self.btn_check.setObjectName("Accent")
+        self.btn_check.setCursor(Qt.PointingHandCursor)
+        self.btn_check.clicked.connect(self.check)
+        row.addWidget(self.btn_check)
+        self.btn_release = QPushButton("打开发布页")
+        self.btn_release.setObjectName("Tool")
+        self.btn_release.setCursor(Qt.PointingHandCursor)
+        self.btn_release.clicked.connect(self.open_release_page)
+        row.addWidget(self.btn_release)
+        row.addStretch(1)
+        ul.addLayout(row)
+
+        self.lbl_status = QLabel("还没检查过。")
+        self.lbl_status.setObjectName("Hint")
+        self.lbl_status.setWordWrap(True)
+        ul.addWidget(self.lbl_status)
+
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(8)
+        self.bar.setVisible(False)
+        ul.addWidget(self.bar)
+
+        tip = QLabel("更新只替换程序目录（app\\），servers.json、缓存和配色都会保留。"
+                     "下载地址是 GitHub Releases；连不上时点「打开发布页」手动下载。")
+        tip.setObjectName("Hint")
+        tip.setWordWrap(True)
+        ul.addWidget(tip)
+        v.addWidget(up)
+        v.addStretch(1)
+
+    # ---------- 动作 ----------
+    def open_release_page(self):
+        QDesktopServices.openUrl(QUrl("https://github.com/%s/releases" % updater.REPO))
+
+    def _busy(self):
+        return self._worker is not None and self._worker.isRunning()
+
+    def check(self):
+        if self._busy():
+            return
+        self.btn_check.setEnabled(False)
+        self.bar.setVisible(False)
+        self.lbl_status.setText("正在检查更新…")
+        self._worker = _Worker(lambda cb: updater.latest_tag(), self)
+        self._worker.ok.connect(self._on_checked)
+        self._worker.err.connect(self._on_error)
+        self._worker.start()
+
+    def _on_checked(self, tag):
+        self.btn_check.setEnabled(True)
+        if not updater.is_newer(tag):
+            self.lbl_status.setText("已经是最新版（%s）" % APP_VERSION)
+            QMessageBox.information(self, "检查更新", "已经是最新版（%s）。" % APP_VERSION)
+            return
+        self._tag = tag
+        self.lbl_status.setText("发现新版本 %s（当前 %s）" % (tag, APP_VERSION))
+        ok = QMessageBox.question(
+            self, "发现新版本",
+            "发现新版本 %s，当前是 %s。\n\n现在下载并覆盖安装吗？\n"
+            "下载完会关闭程序、替换 app\\ 后自动重启；配置和缓存都会保留。" % (tag, APP_VERSION))
+        if ok == QMessageBox.Yes:
+            self.start_download()
+
+    def start_download(self):
+        if updater.install_mode() == "source":
+            QMessageBox.warning(self, "无法自动更新",
+                                "当前是源码运行，请用 git pull 更新。")
+            return
+        if self._busy():
+            return
+        self.btn_check.setEnabled(False)
+        self.bar.setVisible(True)
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.lbl_status.setText("正在下载…")
+        self._worker = _Worker(lambda cb: updater.prepare(progress=cb), self)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.ok.connect(self._on_ready)
+        self._worker.err.connect(self._on_error)
+        self._worker.start()
+
+    def _on_progress(self, got, total):
+        if total and total > 0:
+            self.bar.setRange(0, 100)
+            self.bar.setValue(int(got * 100 / total))
+            self.lbl_status.setText("正在下载… %.1f / %.1f MB" % (got / 1048576.0, total / 1048576.0))
+        else:
+            self.bar.setRange(0, 0)
+            self.lbl_status.setText("正在下载… %.1f MB" % (got / 1048576.0))
+
+    def _on_ready(self, result):
+        helper, tag = result
+        self.bar.setRange(0, 100)
+        self.bar.setValue(100)
+        self.lbl_status.setText("下载完成，等待重启安装")
+        ok = QMessageBox.question(
+            self, "下载完成",
+            "新版本 %s 已下载完成。\n\n点「是」立即关闭程序并更新（几秒后自动重新打开）。" % tag)
+        if ok != QMessageBox.Yes:
+            self.btn_check.setEnabled(True)
+            self.lbl_status.setText("已下载，未安装（可以再点一次检查更新）")
+            return
+        try:
+            updater.run_helper(helper)
+        except Exception as e:
+            QMessageBox.critical(self, "启动更新失败", "%s: %s" % (type(e).__name__, e))
+            self.btn_check.setEnabled(True)
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().quit()
+
+    def _on_error(self, msg):
+        self.btn_check.setEnabled(True)
+        self.bar.setVisible(False)
+        self.lbl_status.setText("更新失败：%s" % msg)
+        QMessageBox.critical(
+            self, "更新失败",
+            "%s\n\n可以点「打开发布页」手动下载安装包。" % msg)

@@ -194,6 +194,30 @@ try {
     Write-Ok ("dist\EasyHub 就绪：{0} 个文件，{1:N1} MB，{2:N0}s" -f $n, `
             ((Get-ChildItem $distDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), $sw.Elapsed.TotalSeconds)
 
+    # ── 1b. 便携文件夹版（zip）──
+    # 不只给单文件的原因：onefile 每次启动都要往 %TEMP% 解 230 MB。
+    # 有些机器（策略拦未签名 exe 在 %TEMP% 建目录）会直接报
+    # "Could not create temporary directory!"，管理员启动才不报。
+    # 文件夹版根本不解压：解压 zip 后双击 Easyhub\app\EasyHub.exe 就跑。
+    Write-Step "打包便携文件夹版（zip）"
+    $sw.Restart()
+    $stage = Join-Path $Release '.zipstage'
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    $hubDir = Join-Path $stage 'Easyhub'
+    foreach ($d in @('app', 'config', 'cache', 'logs')) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $hubDir $d) | Out-Null
+    }
+    Copy-Item (Join-Path $distDir '*') (Join-Path $hubDir 'app') -Recurse -Force
+    $zipPath = Join-Path $Release "EasyHub-Portable-$Version.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipPath,
+        [IO.Compression.CompressionLevel]::Optimal, $false)
+    Remove-Item $stage -Recurse -Force
+    $sw.Stop()
+    Write-Ok ("{0}（{1:N1} MB，{2:N0}s）" -f (Split-Path $zipPath -Leaf), `
+            ((Get-Item $zipPath).Length / 1MB), $sw.Elapsed.TotalSeconds)
+
     # ── 2. 便携单文件 ──
     if (-not $SkipPortable) {
         Write-Step "打包便携版（onefile，libmpv 打进包里）"
@@ -249,8 +273,12 @@ if (-not $SkipSetup) {
 # ── 4. 汇总 + 哈希 + Release 说明草稿 ──
 Write-Step "产物与 SHA256"
 # 只认当前版本的产物：release\ 里可能还留着上一版的 exe
-$files = Get-ChildItem $Release -Filter "EasyHub-*-$Version.exe" | Sort-Object Name
-$stale = Get-ChildItem $Release -Filter 'EasyHub-*-*.exe' | Where-Object { $_.Name -notlike "*-$Version.exe" }
+# 只认当前版本的产物：release\ 里可能还留着上一版的 exe / zip
+$files = Get-ChildItem $Release -File |
+    Where-Object { $_.Name -like "EasyHub-*-$Version.*" -and $_.Extension -in '.exe', '.zip' } |
+    Sort-Object Name
+$stale = Get-ChildItem $Release -File |
+    Where-Object { $_.Name -like 'EasyHub-*-*.*' -and $_.Extension -in '.exe', '.zip' -and $_.Name -notlike "*-$Version.*" }
 if ($stale) {
     Write-Warn2 ("release\ 里还有别的版本，未计入本次：{0}" -f (($stale | ForEach-Object Name) -join ', '))
 }
@@ -274,10 +302,14 @@ $notes = New-Object System.Text.StringBuilder
 [void]$notes.AppendLine("## 下载")
 [void]$notes.AppendLine()
 foreach ($r in $rows) {
-    if ($r.Name -like '*Setup*') {
+    if ($r.Name -like '*.zip') {
+        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— **便携文件夹版（推荐）**：解压后双击 ``Easyhub\app\EasyHub.exe`` 即可；不解压到临时目录、启动最快，**拦 %TEMP% 写入的机器也能用**" -f $r.Name, $r.SizeMB))
+    }
+    elseif ($r.Name -like '*Setup*') {
         [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 安装包：中文向导，默认装到「安装包所在目录」下的 ``Easyhub``，**不弹 UAC，不需要管理员权限**，自带卸载；数据在 ``Easyhub\config``（卸载不删）" -f $r.Name, $r.SizeMB))
-    } else {
-        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 便携单文件，双击即用；首次运行在 exe 旁边建 ``Easyhub\config``、``Easyhub\cache``、``Easyhub\logs``，整个文件夹拷走即带走" -f $r.Name, $r.SizeMB))
+    }
+    else {
+        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 便携单文件，双击即用；首次运行在 exe 旁边建 ``Easyhub\config``、``Easyhub\cache``、``Easyhub\logs``。**每次启动要往 %TEMP% 解压 230 MB**，所以要求 ``%TEMP%`` 可写；被策略拦了就用 zip 版" -f $r.Name, $r.SizeMB))
     }
 }
 [void]$notes.AppendLine()
@@ -289,6 +321,19 @@ foreach ($r in $rows) {
     [void]$notes.AppendLine(("{0}  {1}" -f $r.Name.PadRight($w + 2), $r.SHA256))
 }
 [void]$notes.AppendLine('```')
+[void]$notes.AppendLine()
+# 下载者第一眼要看到的两件事：会弹 SmartScreen、首次打开是空引导页
+[void]$notes.AppendLine("## 首次使用")
+[void]$notes.AppendLine()
+[void]$notes.AppendLine("1. 双击 exe。Windows 会弹「Windows 已保护你的电脑」—— 因为 exe 没有代码签名，不是病毒；")
+[void]$notes.AppendLine("   点 **更多信息** → **仍要运行** 即可（只需这一次）")
+[void]$notes.AppendLine("2. 安装版默认装到「安装包所在目录\Easyhub」，全程不弹 UAC；便携版首次运行会在 exe 旁边建 ``Easyhub\``")
+[void]$notes.AppendLine("3. 首次打开是空白引导页（``servers.json`` 不随包分发）→ 点「添加服务器」填地址和账号")
+[void]$notes.AppendLine("4. 单文件版如果报 **Could not create temporary directory!**，说明这台机器不让往 ``%TEMP%`` 解压 ——")
+[void]$notes.AppendLine("   改用 zip 版解压后双击 ``Easyhub\app\EasyHub.exe``，不再需要临时目录")
+[void]$notes.AppendLine("5. 安装包如果报「拒绝访问」（机器策略不许非管理员写开始菜单/注册表），同样改用 zip 版")
+[void]$notes.AppendLine()
+[void]$notes.AppendLine("> 要求：Windows 10 1809+ / Windows 11（64 位）。不需要装 Python、libmpv 或 VC++ 运行库。")
 if ($commit) {
     [void]$notes.AppendLine()
     [void]$notes.AppendLine("构建自 commit ``$commit``。")

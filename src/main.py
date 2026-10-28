@@ -115,11 +115,10 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setApplicationName("EasyHub")
-    # 任务栏 / alt-tab 用的图标（assets\easyhub.ico；打包时由 PyInstaller --icon 写进 exe）
-    from widgets import app_icon
-    _ic = app_icon()
-    if not _ic.isNull():
-        app.setWindowIcon(_ic)
+    # 任务栏 / alt-tab 图标：运行时按当前主题画（深色主题浅字、浅色主题深字）；
+    # exe 文件本身的图标由 PyInstaller --icon 烘焙，形状一致
+    from frame import mark_icon
+    app.setWindowIcon(mark_icon(256))
     try:
         app.setStyle("Fusion")     # 统一各控件外观，QSS 才吃得准
     except Exception:

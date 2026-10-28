@@ -1,21 +1,39 @@
-﻿# EasyHub
+# EasyHub
 
 Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit / 4K**，Emby 只负责取库和记进度，
 播放全程 **DirectStream（原画直达、不转码）**。界面是玻璃（Glassmorphism）风格，可打包成 exe。
 
 ## 下载
 
-最新版本：**[v1.3.2](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.2)**
+最新版本：**[v1.3.3](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.3)**
 
-- `EasyHub-Setup-1.3.2.exe`（66 MB）—— 安装包，中文向导，不弹 UAC
+- `EasyHub-Portable-1.3.3.zip`（91 MB）—— **便携文件夹版（推荐）**：解压后双击 `Easyhub\app\EasyHub.exe`
+  - 不解压到临时目录、启动最快；**机器策略拦 `%TEMP%` 写入时，只有这个版本能跑**
+  - 数据和安装版完全一样（`Easyhub\config` / `cache` / `logs`），整个文件夹拷走即带走
+- `EasyHub-Setup-1.3.3.exe`（66 MB）—— 安装包，中文向导，不弹 UAC
   - 默认装到 **安装包所在目录** 下的 `Easyhub\`：程序进 `Easyhub\app\`，数据进
     `Easyhub\config\`、`Easyhub\cache\`、`Easyhub\logs\` —— 全是普通用户可写的位置，
     **不需要管理员启动**
   - **自带卸载**：开始菜单里有「卸载 EasyHub」，也可以在「设置 → 应用」里卸
     （只删程序，`config\` 里的服务器配置留着）
-- `EasyHub-Portable-1.3.2.exe`（91 MB）—— 便携单文件，双击即用
+- `EasyHub-Portable-1.3.3.exe`（91 MB）—— 便携单文件，双击即用
   - 第一次运行就在 **exe 旁边**建 `Easyhub\`（同样的 config / cache / logs 子目录），
     整个文件夹拷走即带走；放在不可写的目录（如 `Program Files`）时自动退回 `%LOCALAPPDATA%\Easyhub`
+
+> **第一次双击会弹「Windows 已保护你的电脑」** —— exe 没有代码签名，Windows 对下载来的陌生程序
+> 都会拦一道，不是病毒。点 **更多信息 → 仍要运行** 即可。
+>
+> 首次打开是**空白引导页**：`servers.json` 不随包分发（里面是服务器地址和密码），
+> 点「添加服务器」填一下就行。运行环境只要 Windows 10 1809+ / 11（64 位），
+> 不需要装 Python、libmpv 或 VC++ 运行库。
+>
+> **单文件版**（`EasyHub-Portable-*.exe`）每次启动都要往 `%TEMP%` 解压 230 MB。如果它弹出
+> `Could not create temporary directory!`，说明这台机器不允许未签名程序在 `%TEMP%` 建目录
+> （实测：同一台机器上最小号的 PyInstaller 单文件 exe 也一样报，换成 zip 版就正常）——
+> 直接用上面的 zip 版即可，管理员启动虽然也能绕过，但没必要。
+>
+> 安装包在本机也踩到过类似的策略坑：非管理员创建开始菜单快捷方式 / 写 HKCU 卸载项会被拒
+> （日志里是 `IPersistFile::Save` → `0x80070005`），此时要么提权安装，要么也用 zip 版。
 
 两种包的目录结构一样，区别只是安装版多了 `app\`：
 
@@ -30,6 +48,11 @@ Easyhub\
 不在 `%APPDATA%` 里另起一套目录，也就不需要管理员权限；换个文件夹就是一套独立配置。
 实际用的是哪个目录：设置页底部写着 `servers.json` 的完整路径，`--probe` 也会打印。
 
+**1.3.3 加了「设置 → 关于 → 检查更新」**：读 GitHub 的 Release 页面（不走有速率限制的 API），
+有新版本就下载 zip、关掉程序、替换 `app\` 再自动重启；配置和缓存都不动。
+检查失败、下载失败都会弹窗说明原因，并留一个「打开发布页」手动下载的入口。
+图标也改成跟着主题换色：深色主题浅色 M、浅色主题深色 M，红描边不变。
+
 **1.3.2 改的是界面外壳**：原生 Windows 标题栏整条换掉（自绘标题条 + 主题化窗口按钮，
 拖动/贴边/双键全屏都保留），「添加服务器」对话框也改成圆角卡片的无边框窗；
 WiFi 那一行从勾选框换成自绘开关；顺手修了「测试连接成功却显示红色 ✗」——
@@ -43,7 +66,7 @@ WiFi 那一行从勾选框换成自绘开关；顺手修了「测试连接成功
 
 **两个文件名都带版本号**，下载后一眼能看出是哪一版（窗口标题里也写着版本）。
 
-> 仓库私有，下载需登录本仓库的 GitHub 账号。
+> 仓库已转公开，Releases 里的包可直接下载。
 
 ## 为什么自己做
 

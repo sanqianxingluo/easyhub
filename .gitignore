@@ -1,4 +1,4 @@
-﻿# ── 运行时产物 ──
+# ── 运行时产物 ──
 __pycache__/
 *.py[cod]
 cache/
@@ -39,3 +39,6 @@ src/ui_v1_backup.py
 # ── 开发期自检产物（截图 / 图标对比图）──
 dev/shots/
 dev/icon_variants/
+
+# ── 自动更新临时目录（下载 + 解压 + 替换脚本）──
+.update/
