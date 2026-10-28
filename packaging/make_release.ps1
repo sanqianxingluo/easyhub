@@ -5,9 +5,15 @@
 
 .DESCRIPTION
     产物全部落在 release\ 下（已在 .gitignore 里，不会误提交）：
-        release\EasyHub-Setup-<版本>.exe      安装包（中文向导 / 按用户装 / 不弹 UAC / 自带卸载）
-        release\EasyHub-Portable-<版本>.exe   便携单文件
+        release\EasyHub-Setup-<版本>.exe      安装包（中文向导 / 默认装到安装包旁的 Easyhub / 不弹 UAC / 自带卸载）
+        release\EasyHub-Portable-<版本>.exe   便携单文件（首次运行在 exe 旁建 Easyhub）
         release\release-notes.md              可直接粘到 GitHub Release 的说明（含哈希）
+
+    两种包的目录布局一致，都在「当前目录」下的 Easyhub 里，普通用户权限即可写：
+        Easyhub\app\     程序本体（仅安装版）
+        Easyhub\config\  servers.json
+        Easyhub\cache\   缓存
+        Easyhub\logs\    日志
 
     版本号唯一来源是 src\version.py 的 APP_VERSION —— 发版前先改那里。
 
@@ -165,12 +171,20 @@ New-Item -ItemType Directory -Force -Path $Release | Out-Null
 
 Push-Location $Src
 try {
+    # 图标：dev\make_icon.py 生成（黑 M + 红描边），同时给 exe 和窗口用
+    $Icon = Join-Path $Src 'assets\easyhub.ico'
+    $Assets = Join-Path $Src 'assets'
+    if (-not (Test-Path $Icon)) { throw "找不到 $Icon（先跑 python dev\make_icon.py）" }
+
     # ── 1. onedir（安装包的载荷）──
     Write-Step "打包目录版（onedir）"
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $null = Invoke-Tool $Python @(
         '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
-        '--name', 'EasyHub', '--onedir', 'main.py'
+        '--icon', $Icon,
+        '--name', 'EasyHub', '--onedir',
+        '--add-data', "$Assets;assets",
+        'main.py'
     ) 'PyInstaller onedir'
     $distDir = Join-Path $Src 'dist\EasyHub'
     if (-not (Test-Path (Join-Path $distDir 'EasyHub.exe'))) { throw "打包失败：没有 dist\EasyHub\EasyHub.exe" }
@@ -182,27 +196,16 @@ try {
 
     # ── 2. 便携单文件 ──
     if (-not $SkipPortable) {
-        Write-Step "打包便携版（onefile，libmpv + portable.txt 都打进包里）"
+        Write-Step "打包便携版（onefile，libmpv 打进包里）"
         $sw.Restart()
-        # 便携版要真正做到「配置与程序同目录」：把 portable.txt 打进包里，
-        # paths.is_portable() 会去 _MEIPASS 找它（目录版/安装版不带这个标记）
-        $marker = Join-Path $Src 'portable.txt'
-        $markerMade = $false
-        if (-not (Test-Path $marker)) {
-            [IO.File]::WriteAllText($marker, "EasyHub 便携版标记：配置写在程序同目录。`r`n",
-                (New-Object System.Text.UTF8Encoding($false)))
-            $markerMade = $true
-        }
-        try {
-            $null = Invoke-Tool $Python @(
-                '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
-                '--name', 'EasyHub-Portable', '--onefile',
-                '--add-binary', "$LibMpv;.", '--add-data', "$marker;.", 'main.py'
-            ) 'PyInstaller onefile'
-        }
-        finally {
-            if ($markerMade) { Remove-Item $marker -Force -ErrorAction SilentlyContinue }
-        }
+        # 便携版不用再塞 portable.txt：数据一律落在 exe 旁边的 Easyhub\（见 src\paths.py），
+        # 目录版/安装版走的是同一套规则，只是安装版的 exe 在 Easyhub\app\ 里。
+        $null = Invoke-Tool $Python @(
+            '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
+            '--icon', $Icon,
+            '--name', 'EasyHub-Portable', '--onefile',
+            '--add-binary', "$LibMpv;.", '--add-data', "$Assets;assets", 'main.py'
+        ) 'PyInstaller onefile'
         $portableSrc = Join-Path $Src 'dist\EasyHub-Portable.exe'
         if (-not (Test-Path $portableSrc)) { throw "打包失败：没有 dist\EasyHub-Portable.exe" }
         $portable = Join-Path $Release "EasyHub-Portable-$Version.exe"
@@ -233,6 +236,7 @@ if (-not $SkipSetup) {
         "/DAppVersion=$Version",
         "/DSrcDir=$(Join-Path $Src 'dist\EasyHub')",
         "/DOutDir=$Release",
+        "/DIconFile=$Icon",
         $iss
     ) 'ISCC'
     $setup = Join-Path $Release "EasyHub-Setup-$Version.exe"
@@ -271,9 +275,9 @@ $notes = New-Object System.Text.StringBuilder
 [void]$notes.AppendLine()
 foreach ($r in $rows) {
     if ($r.Name -like '*Setup*') {
-        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 安装包：中文向导，按用户装到 ``%LOCALAPPDATA%\Programs\EasyHub``，**不弹 UAC**，自带卸载" -f $r.Name, $r.SizeMB))
+        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 安装包：中文向导，默认装到「安装包所在目录」下的 ``Easyhub``，**不弹 UAC，不需要管理员权限**，自带卸载；数据在 ``Easyhub\config``（卸载不删）" -f $r.Name, $r.SizeMB))
     } else {
-        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 便携单文件，双击即用" -f $r.Name, $r.SizeMB))
+        [void]$notes.AppendLine(("- ``{0}``（{1} MB）—— 便携单文件，双击即用；首次运行在 exe 旁边建 ``Easyhub\config``、``Easyhub\cache``、``Easyhub\logs``，整个文件夹拷走即带走" -f $r.Name, $r.SizeMB))
     }
 }
 [void]$notes.AppendLine()

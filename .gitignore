@@ -1,4 +1,4 @@
-# ── 运行时产物 ──
+﻿# ── 运行时产物 ──
 __pycache__/
 *.py[cod]
 cache/
@@ -6,6 +6,9 @@ dist/
 build/
 *.spec
 release/
+
+# ── 运行期数据目录（Easyhub\config|app|cache|logs）──
+Easyhub/
 
 # ── 解码内核（115 MB，自己下，别提交）──
 libmpv-2.dll
@@ -32,3 +35,7 @@ shot_*.png
 
 # ── 旧的临时备份 ──
 src/ui_v1_backup.py
+
+# ── 开发期自检产物（截图 / 图标对比图）──
+dev/shots/
+dev/icon_variants/

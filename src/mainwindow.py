@@ -11,7 +11,8 @@ from library import MultiEmby
 from setup_ui import WelcomePage, ServerPage, ServerDialog
 from settings_ui import AppearancePage, SettingsPage
 from version import APP_VERSION
-from widgets import fetch_async
+from widgets import fetch_async, app_icon
+from frame import TitleBar, hit_test
 from poster import item_title
 from page_home import HomePage
 from page_browse import BrowsePage
@@ -30,6 +31,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("EasyHub %s" % APP_VERSION)
         self.resize(1360, 840)
         self.setMinimumSize(980, 640)
+        # 原生标题栏整条不要（配色/字重跟玻璃皮肤对不上），换成自绘标题条；
+        # 拖动与边缘缩放分别由 TitleBar（startSystemMove）和 WM_NCHITTEST 负责。
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.setWindowIcon(app_icon())
 
         self.gpu_all = list_adapters()
         # 初始用「上次探测成功记住的适配器」，没有就先用第一个（最像真实 GPU 的），
@@ -41,9 +46,21 @@ class MainWindow(QMainWindow):
         root = QWidget()
         root.setObjectName("Root")
         self.setCentralWidget(root)
-        h = QHBoxLayout(root)
+
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # 整窗顶部的自绘标题条（名字 + 版本 + 最小化/最大化/关闭）
+        # 不放图标：透明底的黑 M 在深色标题条上 18px 只剩一团红描边，反而脏
+        self.titlebar = TitleBar(self, "EasyHub", "v" + APP_VERSION)
+        outer.addWidget(self.titlebar)
+
+        body = QWidget()
+        h = QHBoxLayout(body)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(0)
+        outer.addWidget(body, 1)
 
         # ── 玻璃侧栏 ──
         side = QWidget()
@@ -615,7 +632,7 @@ class MainWindow(QMainWindow):
         self.store.set_pref("sidebar_hidden", not vis)
 
     def _sync_chrome(self, full=None):
-        """全屏时收起侧栏与顶部标题行（全屏播放就该只剩画面）。
+        """全屏时收起侧栏与顶部标题条（全屏播放就该只剩画面）。
 
         ⚠ 必须由调用方把目标状态传进来：`showFullScreen()` 是**异步**的，
         调用后立刻 `isFullScreen()` 还是 False（实测踩过，等于没收起）。
@@ -625,6 +642,18 @@ class MainWindow(QMainWindow):
         hidden = bool(self.store.get_pref("sidebar_hidden"))
         self.side.setVisible((not full) and (not hidden))
         self.top.setVisible(not full)
+        self.titlebar.setVisible(not full)
+
+    def nativeEvent(self, evt_type, message):
+        """无边框窗口的边缘缩放：只回 WM_NCHITTEST，别动 WM_NCCALCSIZE。
+
+        这样最大化、贴边分屏、Aero Snap 仍然走系统原生逻辑，只是「边框」变成
+        我们画的那 6px 热区。
+        """
+        code = hit_test(self, evt_type, message)
+        if code is not None:
+            return True, code
+        return super().nativeEvent(evt_type, message)
 
     def toggle_fullscreen(self):
         go_full = not self.isFullScreen()
@@ -644,6 +673,7 @@ class MainWindow(QMainWindow):
         super().changeEvent(e)
         if e.type() == QEvent.WindowStateChange:
             self._sync_chrome(self.isFullScreen())
+            self.titlebar.sync_state()
 
     def esc_key(self):
         if self.isFullScreen():

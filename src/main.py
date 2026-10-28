@@ -2,13 +2,14 @@
 """EasyHub —— Emby 桌面客户端（libmpv 原生硬解）
 
 启动：python main.py    或者直接双击 EasyHub.exe
-配置：程序目录下的 servers.json（在软件里「服务器」页添加/编辑）
+配置：当前目录下 Easyhub\\config\\servers.json（在软件里「服务器」页添加/编辑）；
+      海报缓存 Easyhub\\cache\\，日志 Easyhub\\logs\\ —— 详见 paths.py
 """
 import os
 import sys
 import traceback
 
-from paths import app_dir, cache_dir, data_path
+from paths import app_dir, cache_dir, log_path, root_dir
 
 BASE = app_dir()
 os.environ["PATH"] = BASE + os.pathsep + os.environ.get("PATH", "")
@@ -47,7 +48,7 @@ def fatal(msg):
     except Exception:
         pass
     try:
-        with open(data_path("error.log"), "w", encoding="utf-8") as f:
+        with open(log_path("error.log"), "w", encoding="utf-8") as f:
             f.write(msg)
     except Exception:
         pass
@@ -59,8 +60,16 @@ def probe():
     import json
     out = {"frozen": bool(getattr(sys, "frozen", False)), "base": BASE,
            "python": sys.version.split()[0]}
+    # 目录布局：确认 Easyhub 落在「当前目录」下，且 config/cache/logs 都建出来了
+    from paths import config_dir, log_dir
+    out["hub_root"] = root_dir()
+    out["config_dir"] = config_dir()
+    out["cache_dir"] = cache_dir()
+    out["log_dir"] = log_dir()
     dll = os.path.join(BASE, "libmpv-2.dll")
-    out["libmpv_exists"] = os.path.exists(dll)
+    # 便携单文件版（onefile）的 dll 在解压目录里，不在 exe 旁边
+    mei = getattr(sys, "_MEIPASS", "") or ""
+    out["libmpv_exists"] = os.path.exists(dll) or bool(mei and os.path.exists(os.path.join(mei, "libmpv-2.dll")))
     out["path_has_base"] = BASE in os.environ.get("PATH", "")
     try:
         import mpv
@@ -91,7 +100,7 @@ def probe():
     except Exception as e:
         out["server_err"] = repr(e)
     try:
-        json.dump(out, open(data_path("probe_result.json"), "w",
+        json.dump(out, open(log_path("probe_result.json"), "w",
                             encoding="utf-8"), ensure_ascii=False, indent=1)
     except Exception:
         pass
@@ -106,6 +115,11 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setApplicationName("EasyHub")
+    # 任务栏 / alt-tab 用的图标（assets\easyhub.ico；打包时由 PyInstaller --icon 写进 exe）
+    from widgets import app_icon
+    _ic = app_icon()
+    if not _ic.isNull():
+        app.setWindowIcon(_ic)
     try:
         app.setStyle("Fusion")     # 统一各控件外观，QSS 才吃得准
     except Exception:

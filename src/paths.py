@@ -1,9 +1,33 @@
-"""程序目录 / 数据目录（兼容 PyInstaller 打包后的 exe）。"""
+"""程序目录 / 数据目录（兼容 PyInstaller 打包后的 exe）。
+
+统一布局：所有可写内容都收在一个 **Easyhub** 文件夹里，默认就在「程序 / 安装包
+所在的当前目录」下，普通用户权限就能写 —— 不需要管理员启动：
+
+    <当前目录>\\Easyhub\\
+        ├─ app\\      程序本体（仅安装版：EasyHub.exe、_internal\\、libmpv-2.dll）
+        ├─ config\\   servers.json
+        ├─ cache\\    海报 / 库列表缓存
+        └─ logs\\     error.log、probe_result.json
+
+三种运行方式落在哪：
+
+    安装版（<任意目录>\\Easyhub\\app\\EasyHub.exe）  -> 上一级的 Easyhub\\（就是安装目录）
+    便携版（任意位置\\EasyHub-Portable-x.y.z.exe）    -> exe 旁边的 Easyhub\\
+    源码   （src\\main.py）                          -> src\\Easyhub\\
+
+目录建不出来 / 写不进去时（比如便携版被丢进 Program Files），自动退回
+%LOCALAPPDATA%\\Easyhub，不会一启动就崩。实际用的是哪个目录，看设置页底部，
+或者 `python src\\main.py --probe` 打印的 hub_root。
+"""
 import os
 import sys
 
-# 目录可写性只探一次（data_dir 会被 cache_dir 等频繁调用）
+# 数据总目录的名字，全项目只认这一个写法
+HUB_DIRNAME = "Easyhub"
+
+# 目录可写性只探一次（root_dir 会被 cache_dir / log_dir 频繁调用）
 _writable_cache = {}
+_root_cache = None
 
 
 def app_dir():
@@ -16,16 +40,48 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def is_installed_layout():
+    """安装版：exe 在 `<安装目录>\\Easyhub\\app\\` 里（安装包按这个结构铺文件）。"""
+    if not getattr(sys, "frozen", False):
+        return False
+    return os.path.basename(app_dir()).lower() == "app"
+
+
 def _bundle_dir():
-    """onefile 运行时解压出来的临时目录（源码 / 目录版可能没有 → 空串）。"""
+    """PyInstaller 解压目录（onefile 是临时目录，onedir 是 `_internal`）；源码运行为空串。"""
     return getattr(sys, "_MEIPASS", "") or ""
+
+
+def resource(name):
+    """assets 里的资源（图标等）。
+
+    源码运行找 `src\\assets\\`；打包后找 `_MEIPASS\\assets\\`（onedir 即 `_internal\\assets`）。
+    找不到返回空串 —— 调用方自己降级，别为了一张图标把启动搞崩。
+    """
+    for base in (app_dir(), _bundle_dir()):
+        if not base:
+            continue
+        p = os.path.join(base, "assets", name)
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+def hub_root():
+    """Easyhub 文件夹该在哪（不保证已存在，root_dir() 负责建）。"""
+    base = app_dir()
+    if is_installed_layout():
+        # 安装版：程序在 app\ 里，数据放它上一级，别再套一层 Easyhub
+        return os.path.dirname(base)
+    # 便携版 / 源码运行：当前目录下新建 Easyhub
+    return os.path.join(base, HUB_DIRNAME)
 
 
 def _writable(d):
     """目录是否真的可写。
 
-    便携版被丢进 Program Files 这类受保护目录时程序目录不可写 ——
-    盲写会抛异常，所以先探一次，不行就退回 APPDATA。
+    只判断「存在」不够：Program Files 下目录存在但写不进，盲写会抛异常，
+    所以真写一个探针文件再删掉。
     """
     if d in _writable_cache:
         return _writable_cache[d]
@@ -43,48 +99,33 @@ def _writable(d):
     return ok
 
 
-def is_portable():
-    """是否「便携模式」（配置写在程序目录旁边）。
-
-    三种情况算便携：
-      · 源码运行（开发时本来就地存）
-      · exe 旁边有 portable.txt 或 servers.json（用户自己放的 / 上次跑出来的）
-      · **包里自带 portable.txt** —— 便携单文件版就是这么打的：
-        打包时用 --add-data 塞进 _MEIPASS，运行时解压出来能读到
-    """
-    if not getattr(sys, "frozen", False):
-        return True
-    base = app_dir()
-    for d in (base, _bundle_dir()):
-        if d and os.path.exists(os.path.join(d, "portable.txt")):
-            return True
-    return os.path.exists(os.path.join(base, "servers.json"))
+def _fallback_root():
+    """程序目录不可写时的退路：先 LOCALAPPDATA，再 APPDATA，最后家目录。"""
+    for env in ("LOCALAPPDATA", "APPDATA"):
+        p = os.environ.get(env)
+        if p:
+            return os.path.join(p, HUB_DIRNAME)
+    return os.path.join(os.path.expanduser("~"), HUB_DIRNAME)
 
 
-def data_dir():
-    """配置（servers.json）放哪：
-
-    - 源码运行  -> 源码目录（开发方便）
-    - 便携版    -> 程序目录（包里带 portable.txt，或旁边有 portable.txt / servers.json），
-                   拷走整个文件夹就把配置一起带走了；目录不可写时自动退回 APPDATA
-    - 安装版    -> APPDATA 下的 EasyHub 目录
-      （装到 Program Files 这类受保护目录时程序目录不可写，配置必须另找地方）
-    """
-    if not getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(__file__))
-    base = app_dir()
-    if is_portable() and _writable(base):
-        return base
-    d = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "EasyHub")
-    try:
-        os.makedirs(d, exist_ok=True)
-    except Exception:
-        return base
-    return d
+def root_dir():
+    """Easyhub 根目录（保证存在，且已确认可写）。"""
+    global _root_cache
+    if _root_cache:
+        return _root_cache
+    primary = hub_root()
+    target = primary
+    if not _writable(primary):
+        fb = _fallback_root()
+        if _writable(fb):
+            target = fb
+        # 连退路都写不了：还是返回主目录，让上层按原来的方式报错，别悄悄换路径
+    _root_cache = target
+    return _root_cache
 
 
-def cache_dir():
-    d = os.path.join(data_dir(), "cache")
+def _sub(name):
+    d = os.path.join(root_dir(), name)
     try:
         os.makedirs(d, exist_ok=True)
     except Exception:
@@ -92,5 +133,29 @@ def cache_dir():
     return d
 
 
+def config_dir():
+    """servers.json 所在目录。"""
+    return _sub("config")
+
+
+def data_dir():
+    """兼容旧名字：配置目录（= config_dir()）。"""
+    return config_dir()
+
+
+def cache_dir():
+    """海报 / 库列表缓存。"""
+    return _sub("cache")
+
+
+def log_dir():
+    """error.log / probe_result.json 所在目录。"""
+    return _sub("logs")
+
+
 def data_path(name):
     return os.path.join(data_dir(), name)
+
+
+def log_path(name):
+    return os.path.join(log_dir(), name)

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QStackedWidget)
 
 import theme
+from paths import data_path
 from setup_ui import Glass, _title
 
 
@@ -168,9 +169,11 @@ class AppearancePage(QWidget):
         box.addWidget(self._custom_card())
         box.addWidget(self._widgets_card())
 
-        foot = QLabel("配色跟着 servers.json 走（prefs.theme），和服务器配置一起拷贝即可。")
+        foot = QLabel("配色跟着 servers.json 走（prefs.theme），和服务器配置一起拷贝即可。\n"
+                      f"配置文件：{data_path('servers.json')}")
         foot.setObjectName("Hint")
         foot.setWordWrap(True)
+        foot.setTextInteractionFlags(Qt.TextSelectableByMouse)
         box.addWidget(foot)
         box.addStretch(1)
 

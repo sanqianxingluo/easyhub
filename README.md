@@ -1,21 +1,45 @@
-# EasyHub
+﻿# EasyHub
 
 Windows 桌面端 Emby 客户端。**libmpv 内核，原生硬解 HEVC / 10bit / 4K**，Emby 只负责取库和记进度，
 播放全程 **DirectStream（原画直达、不转码）**。界面是玻璃（Glassmorphism）风格，可打包成 exe。
 
 ## 下载
 
-最新版本：**[v1.3.0](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.0)**
+最新版本：**[v1.3.2](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.2)**
 
-- `EasyHub-Setup-1.3.0.exe`（66 MB）—— 安装包，中文向导，按用户装到 `%LOCALAPPDATA%\Programs\EasyHub`，不弹 UAC
+- `EasyHub-Setup-1.3.2.exe`（66 MB）—— 安装包，中文向导，不弹 UAC
+  - 默认装到 **安装包所在目录** 下的 `Easyhub\`：程序进 `Easyhub\app\`，数据进
+    `Easyhub\config\`、`Easyhub\cache\`、`Easyhub\logs\` —— 全是普通用户可写的位置，
+    **不需要管理员启动**
   - **自带卸载**：开始菜单里有「卸载 EasyHub」，也可以在「设置 → 应用」里卸
-- `EasyHub-Portable-1.3.0.exe`（91 MB）—— 便携单文件，双击即用
-  - 配置（`servers.json`、`cache\`）就写在 **exe 旁边**，整个文件夹拷走即带走；
-    放在不可写的目录（如 `Program Files`）时会自动退回 `%APPDATA%\EasyHub`
+    （只删程序，`config\` 里的服务器配置留着）
+- `EasyHub-Portable-1.3.2.exe`（91 MB）—— 便携单文件，双击即用
+  - 第一次运行就在 **exe 旁边**建 `Easyhub\`（同样的 config / cache / logs 子目录），
+    整个文件夹拷走即带走；放在不可写的目录（如 `Program Files`）时自动退回 `%LOCALAPPDATA%\Easyhub`
 
-**这一版修了两件事**：电视直播库列出来的其实是全服务器的剧集（LiveTV 库不能用 `/Items` 递归查），
-以及切换媒体库偏卡（列表没缓存 + 大库一次性建上千张卡）。详见
-[Release 说明](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.0)。
+两种包的目录结构一样，区别只是安装版多了 `app\`：
+
+```
+Easyhub\
+├─ app\      程序本体（仅安装版：EasyHub.exe、_internal\、libmpv-2.dll）
+├─ config\   servers.json —— 服务器配置、配色偏好
+├─ cache\    海报 / 库列表缓存
+└─ logs\     error.log、probe_result.json
+```
+
+不在 `%APPDATA%` 里另起一套目录，也就不需要管理员权限；换个文件夹就是一套独立配置。
+实际用的是哪个目录：设置页底部写着 `servers.json` 的完整路径，`--probe` 也会打印。
+
+**1.3.2 改的是界面外壳**：原生 Windows 标题栏整条换掉（自绘标题条 + 主题化窗口按钮，
+拖动/贴边/双键全屏都保留），「添加服务器」对话框也改成圆角卡片的无边框窗；
+WiFi 那一行从勾选框换成自绘开关；顺手修了「测试连接成功却显示红色 ✗」——
+以前拿 `note` 是不是以 `http` 开头判断成功，但成功时 `note` 是**服务器名**，于是掉进了失败分支。
+另外有了正式图标：透明底、艺术体黑色 M + 红描边（`src\assets\easyhub.ico`，由 `dev\make_icon.py` 生成）。
+
+**1.3.1 改的是目录**：便携版和安装版都改成「当前目录 → `Easyhub\` → 再分 `app` / `config` / `cache` / `logs`」，
+普通用户权限即可写，不用管理员启动；安装包默认就装到安装包旁边的 `Easyhub\`。
+再往前 1.3.0 修的是电视直播库列表和切库卡顿，见
+[v1.3.0 Release 说明](https://github.com/sanqianxingluo/easyhub/releases/tag/v1.3.0)。
 
 **两个文件名都带版本号**，下载后一眼能看出是哪一版（窗口标题里也写着版本）。
 
@@ -94,21 +118,23 @@ Ctrl+R / F5 刷新当前页 · Ctrl+B 收起侧栏
 EasyHub/
 ├─ src/
 │  ├─ main.py            入口（QApplication + 连服务器 + 主窗口）
-│  ├─ mainwindow.py      主窗口：侧栏 / 标题栏 / 页面切换 / 快捷键
+│  ├─ mainwindow.py      主窗口：侧栏 / 页面切换 / 快捷键
+│  ├─ frame.py           无边框窗口：自绘标题条 + 窗口按钮 + 边缘缩放 + FramelessDialog
 │  ├─ page_home.py       首页        page_browse.py  浏览页（海报墙容器）
 │  ├─ page_detail.py     详情页      page_player.py  播放页 + 悬浮控制条
 │  ├─ poster.py          海报网格 / 推荐卡 / 媒体库格
-│  ├─ widgets.py         图片异步加载 / 玻璃背景 / 显示名与悬停文本
+│  ├─ widgets.py         图片异步加载 / 玻璃背景 / 开关 / 显示名与悬停文本
 │  ├─ player.py          libmpv 封装（硬解探测 / 播放 / 音轨字幕）
 │  ├─ emby.py            Emby API 客户端      library.py  多服务器聚合 + 缓存接入
 │  ├─ libcache.py        列表缓存（内存 + 磁盘，TTL）
 │  ├─ servers.py         服务器配置（双地址 / 协议 / 端口 / WiFi）
 │  ├─ setup_ui.py        欢迎页 / 服务器列表 / 添加对话框
 │  ├─ settings_ui.py     设置页（服务器 + 外观两栏）
-│  ├─ theme.py           配色与全局 QSS      paths.py  程序目录（兼容打包）
+│  ├─ theme.py           配色与全局 QSS      paths.py  Easyhub 目录规则（config/cache/logs）
 │  ├─ ui.py              兼容入口：`from ui import MainWindow` 仍然有效
+│  ├─ assets/            图标（easyhub.ico / easyhub_256.png，dev\make_icon.py 生成）
 │  ├─ libmpv-2.dll (115MB)                  解码内核，必须与程序同目录
-│  └─ servers.json                          服务器配置（在软件里改）
+│  └─ Easyhub/           运行期数据（config / cache / logs，不进仓库）
 ├─ dev/             自检 / 截图脚本（不进发布包）见 dev/README.md
 ├─ packaging/       发版脚本：make_release.ps1 + easyhub.iss（安装包配置）
 ├─ requirements.txt 运行依赖
@@ -126,6 +152,9 @@ EasyHub/
 
 `libmpv-2.dll` 必须和 `EasyHub.exe` 在同一目录。
 
+直接跑目录版时，数据落在程序旁边的 `Easyhub\`（也就是 `dist/EasyHub/Easyhub\`），
+和安装版是同一套规则 —— 见「7. 数据目录布局」。
+
 想要单文件版也可以打：`pyinstaller --onefile ...`，但启动时要把 225MB 解压到临时目录，会慢十几秒，不推荐。
 
 发版（一条命令，先改 `src/version.py` 的 `APP_VERSION`）：
@@ -137,7 +166,7 @@ EasyHub/
 它会依次做：
 
 1. PyInstaller 打 `dist\EasyHub`（目录版，安装包的载荷）+ `release\EasyHub-Portable-<版本>.exe`（便携单文件，libmpv 打进包里）
-2. 用 Inno Setup 生成 `release\EasyHub-Setup-<版本>.exe`（中文向导 / 按用户装 / 不弹 UAC / 自带卸载）
+2. 用 Inno Setup 生成 `release\EasyHub-Setup-<版本>.exe`（中文向导 / 默认装到安装包旁的 `Easyhub\` / 不弹 UAC / 自带卸载）
 3. 算好 SHA256 并写 `release\release-notes.md`（含校验值，可直接粘到 GitHub Release）
 
 前提：
@@ -171,6 +200,8 @@ cd ..
 python src\main.py --probe    # 打包后环境自检（libmpv 能否加载、服务器能否连上）
 python dev\selftest.py        # 连库→取片→播放→换音轨→切字幕→seek
 python dev\ui_flow.py         # 遍历全部媒体库 + 详情页 + 播放 + 选集 + 服务器管理，出截图
+python dev\check_frame.py     # 无边框框架 / 对话框 / 测试连接配色（截图到 dev\shots）
+python dev\make_icon.py       # 重新生成图标（黑 M + 红描边 → src\assets）
 ```
 
 ## 关键实现点
@@ -266,21 +297,51 @@ GET /Videos/{id}/stream?Static=true&api_key=<token>
 页面背景是 `paintEvent` 现画的（取 `theme.current()`），所以换完 update() 一下，
 所有页面立刻跟着变，不需要重建控件、也不丢当前浏览状态。
 
-### 7. 便携版怎么判断「配置放哪」
+### 7. 数据目录布局（Easyhub）
+
+所有可写内容都收在一个 `Easyhub` 文件夹里，位置跟着「当前目录」走，普通用户权限就够：
+
+| 运行方式 | `Easyhub` 在哪 | 里面 |
+|---|---|---|
+| 安装版 | 安装目录本身（exe 在 `Easyhub\app\` 里，往上退一级） | `app\` `config\` `cache\` `logs\` |
+| 便携版 | exe 旁边的 `Easyhub\` | `config\` `cache\` `logs\` |
+| 源码 | `src\Easyhub\` | `config\` `cache\` `logs\` |
 
 `paths.py` 的判断顺序：
 
-1. 源码运行 → 源码目录
-2. **包里自带 `portable.txt`**（便携单文件版打包时用 `--add-data` 塞进 `_MEIPASS`），
-   或者 exe 旁边有 `portable.txt` / `servers.json` → 程序目录
-3. 都不满足 → `%APPDATA%\EasyHub`（安装版走这条）
+1. `hub_root()`：exe 在 `...\Easyhub\app\` 里 → 取上一级（安装版）；否则 → `<程序目录>\Easyhub`（便携 / 源码）
+2. `root_dir()`：真写一个探针文件试 `hub_root()`，写不进去就退回 `%LOCALAPPDATA%\Easyhub`
+   （再不行 `%APPDATA%\Easyhub`）—— 便携版被丢进 `Program Files` 时不会一启动就崩
+3. `config_dir()` / `cache_dir()` / `log_dir()` 分别建 `config` `cache` `logs`：
+   `servers.json` 落 `config\`，`error.log` / `probe_result.json` 落 `logs\`
 
-第 2 步会先探一次**目录可写性**：便携版被丢进 `Program Files` 这类受保护目录时，
-程序目录写不了就退回 APPDATA，不会一启动就崩。
+为什么这么改：以前安装版写 `%APPDATA%\EasyHub`、便携版写程序目录，两套规则；
+现在程序和数据在同一个普通用户可写的位置，**不用管理员启动**，卸载也只删 `app\`，
+`config\` 里的服务器配置留着。
 
-**坑**：单文件版（onefile）的 `sys.executable` 是 exe 的真实路径，而包里塞的文件解压到
-`sys._MEIPASS` —— 只查 exe 旁边永远查不到那个标记，必须**两处都查**。
-（1.1.0 之前就是只查 exe 旁边，所以「便携版配置与程序同目录」实际没生效。）
+**坑**（单文件版）：`sys.executable` 是 exe 的真实路径，包里塞的东西却解压到 `sys._MEIPASS` ——
+定位「当前目录」只能用 `sys.executable`，别拿 `_MEIPASS` 当前目录。
+
+### 7b. 无边框窗口（自绘标题条）
+
+原生标题栏（哪怕是 DWM 深色）和玻璃皮肤不是一个语汇，所以整条换掉：
+
+- 窗口用 `FramelessWindowHint`，顶部是 `frame.TitleBar`：图标 + 名字 + 版本 + 三个自绘窗口按钮
+- **拖动**走 `QWindow.startSystemMove()`：交给系统跑拖动循环，混合 DPI 不飘，贴边吸附也还在
+  （自己算 `pos` 差值，在 150% 缩放 + 多屏下会漂）
+- **缩放**只处理 `WM_NCHITTEST`（6px 热区 → HTLEFT / HTBOTTOMRIGHT …），**绝不动 `WM_NCCALCSIZE`**：
+  动后者容易把最大化、贴边分屏的几何算错
+- 全屏时标题条必须一起 `setVisible(False)`，否则播放页上面永远压着一条
+- 对话框走 `frame.FramelessDialog`：`WA_TranslucentBackground` + `paintEvent` 画圆角卡片；
+  QSS 里要把 `QDialog#Frameless` 的底色设成 transparent，否则圆角外面还会再铺一层方底
+
+踩过的坑：
+
+- `QWidget` 不设 `WA_StyledBackground` 时，QSS 的 `background` **不生效**（标题条一开始纯黑就是这个）
+- 窗口按钮的字形自己画（`WinButton.paintEvent`）：`❐`、`✕` 这类符号在不同字体下大小差很多，
+  高 DPI 还会糊
+- 「连到指定 WiFi」别用 `QCheckBox`：方勾选框放进玻璃面板像另一个软件的控件，
+  换成 `widgets.ToggleSwitch`（轨道走当前配色的 a1→a2 渐变）
 
 ### 8. 界面为什么是「一套」
 

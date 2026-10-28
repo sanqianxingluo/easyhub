@@ -1,14 +1,18 @@
-"""服务器接入界面：欢迎页（首屏空白）、服务器列表、添加/编辑对话框。"""
+﻿"""服务器接入界面：欢迎页（首屏空白）、服务器列表、添加/编辑对话框。"""
+import html
+
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QFrame, QLineEdit, QComboBox, QCheckBox, QDialog,
+                               QFrame, QLineEdit, QComboBox,
                                QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
                                QSpacerItem)
 
 from servers import (ServerConf, Endpoint, ServerStore, current_ssid, on_wifi,
                      wifi_present)
 from library import MultiEmby
+from frame import FramelessDialog
+from widgets import ToggleSwitch
 import theme
 
 
@@ -82,17 +86,14 @@ class WelcomePage(QWidget):
 
 
 # ═══════════════════ 添加 / 编辑服务器对话框 ═══════════════════
-class ServerDialog(QDialog):
+class ServerDialog(FramelessDialog):
     def __init__(self, conf=None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, title="添加服务器" if conf is None else "编辑服务器")
         self.conf = conf or ServerConf()
         self._is_new = conf is None
-        self.setWindowTitle("添加服务器" if self._is_new else "编辑服务器")
-        self.setMinimumWidth(620)
+        self.setMinimumWidth(640)
 
-        v = QVBoxLayout(self)
-        v.setContentsMargins(26, 22, 26, 22)
-        v.setSpacing(14)
+        v = self.body_layout
 
         g = QGridLayout()
         g.setHorizontalSpacing(10)
@@ -116,8 +117,8 @@ class ServerDialog(QDialog):
         self.ed_lan_host = QLineEdit(self.conf.lan.host or "")
         self.ed_lan_host.setPlaceholderText("192.168.1.100")
         self.ed_lan_port = QLineEdit("" if self.conf.lan.port is None else str(self.conf.lan.port))
-        self.ed_lan_port.setPlaceholderText("8096（留空默认）")
-        self.ed_lan_port.setFixedWidth(96)
+        self.ed_lan_port.setPlaceholderText("8096 默认")
+        self.ed_lan_port.setFixedWidth(104)
         g.addWidget(self.cb_lan_scheme, r, 1)
         g.addWidget(self.ed_lan_host, r, 2)
         g.addWidget(QLabel("端口"), r, 3)
@@ -136,8 +137,8 @@ class ServerDialog(QDialog):
         self.ed_wan_host = QLineEdit(self.conf.wan.host or "")
         self.ed_wan_host.setPlaceholderText("emby.example.com")
         self.ed_wan_port = QLineEdit("" if self.conf.wan.port is None else str(self.conf.wan.port))
-        self.ed_wan_port.setPlaceholderText("443（留空默认）")
-        self.ed_wan_port.setFixedWidth(96)
+        self.ed_wan_port.setPlaceholderText("443 默认")
+        self.ed_wan_port.setFixedWidth(104)
         g.addWidget(self.cb_wan_scheme, r, 1)
         g.addWidget(self.ed_wan_host, r, 2)
         g.addWidget(QLabel("端口"), r, 3)
@@ -162,10 +163,18 @@ class ServerDialog(QDialog):
         wl = QVBoxLayout(wf)
         wl.setContentsMargins(16, 12, 16, 14)
         wl.setSpacing(8)
-        self.ck_auto = QCheckBox("连到指定 WiFi 时自动走内网（否则走外网）")
-        self.ck_auto.setChecked(self.conf.auto_switch)
-        self.ck_auto.toggled.connect(self._sync_wifi_enabled)
-        wl.addWidget(self.ck_auto)
+
+        # 开关 + 说明一行：勾选框换成自绘开关，跟玻璃面板才是一个语汇
+        auto_row = QHBoxLayout()
+        auto_row.setSpacing(12)
+        self.tg_wifi = ToggleSwitch()
+        self.tg_wifi.setChecked(self.conf.auto_switch)
+        self.tg_wifi.toggled.connect(self._sync_wifi_enabled)
+        auto_row.addWidget(self.tg_wifi, 0, Qt.AlignVCenter)
+        lbl_auto = QLabel("连到指定 WiFi 时自动走内网（否则走外网）")
+        lbl_auto.setWordWrap(True)
+        auto_row.addWidget(lbl_auto, 1)
+        wl.addLayout(auto_row)
 
         wr = QHBoxLayout()
         wr.addWidget(QLabel("WiFi 名称"))
@@ -210,10 +219,8 @@ class ServerDialog(QDialog):
 
     # ---------- 小工具 ----------
     def _sync_wifi_enabled(self):
-        on = self.ck_auto.isChecked()
+        on = self.tg_wifi.isChecked()
         self.ed_ssid.setEnabled(on)
-        if not self.ed_name.text() and self.ed_lan_host.text():
-            pass
 
     def _read_ssid(self):
         s = current_ssid(0) or ""
@@ -251,9 +258,21 @@ class ServerDialog(QDialog):
                          self.ed_wan_port.text() or None, external=True)
         c.username = self.ed_user.text().strip()
         c.password = self.ed_pw.text()
-        c.auto_switch = self.ck_auto.isChecked()
+        c.auto_switch = self.tg_wifi.isChecked()
         c.wifi_ssid = self.ed_ssid.text().strip()
         return c
+
+    # ---------- 测试连接 ----------
+    @staticmethod
+    def _line(text, kind="ok"):
+        """一条结果：圆点 + 文字，颜色按语义走（别再靠 emoji —— ✅/❌ 的字体颜色
+        我们管不了，而且中文 Windows 下同一行里 emoji 和汉字基线会对不齐）。"""
+        light = (theme.current().get("mode") or "dark") == "light"
+        color = {"ok": ("#1f9d55" if light else "#79d98e"),
+                 "warn": ("#b7791f" if light else theme.RATING),
+                 "err": ("#c0392b" if light else theme.ON_ERROR)}[kind]
+        return ('<div style="color:%s; font-size:12px; margin:2px 0;">%s %s</div>'
+                % (color, "●", html.escape(text)))
 
     def do_test(self):
         c = self.collect()
@@ -264,21 +283,24 @@ class ServerDialog(QDialog):
         self.btn_test.setEnabled(False)
         try:
             base, cli, results = MultiEmby.probe(c)
+            # ⚠ 判成功只看 ok —— 以前拿 note 是否以 http 开头来判断，
+            # 但成功时 note 是**服务器名**（如「家里的 Emby」），于是落进了
+            # 最后那个 else，测通了却显示红的 ❌。
             lines = []
             for url, ok, note in results:
-                if note and note.startswith("http"):
-                    lines.append("✅ %s —— 连上了（服务器名 %s）" % (url, note))
-                elif ok and not note:
-                    lines.append("⚠️ %s —— 端口通，但登录失败" % url)
+                if ok and note:
+                    lines.append(self._line("%s —— 连上了（服务器名 %s）" % (url, note), "ok"))
+                elif ok:
+                    lines.append(self._line("%s —— 端口通，但登录失败" % url, "warn"))
                 elif note:
-                    lines.append("❌ %s —— %s" % (url, note))
+                    lines.append(self._line("%s —— %s" % (url, note), "err"))
                 else:
-                    lines.append("❌ %s —— 连不上" % url)
+                    lines.append(self._line("%s —— 连不上" % url, "err"))
             if base and cli:
-                lines.insert(0, "连接成功，将使用：%s" % base)
+                lines.insert(0, self._line("连接成功，将使用：%s" % base, "ok"))
                 if cli.token:
                     self.conf.token = cli.token
-            self.lbl_result.setText("\n".join(lines))
+            self.lbl_result.setText("".join(lines))
         except Exception as e:
             self.lbl_result.setText("测试出错：%s" % e)
         finally:

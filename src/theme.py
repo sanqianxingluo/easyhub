@@ -524,6 +524,21 @@ QCheckBox:disabled {{ color: {ink_dim2}; }}
 QLabel#FieldLabel {{ color: {ink_dim}; }}
 QDialog {{ background: {dlg}; }}
 
+/* ── 自绘标题条（frame.TitleBar）：原生标题栏整个不要了 ── */
+#TitleBar {{
+    background: {topbar_bg};
+    border-bottom: 1px solid {fg(0.08)};
+}}
+#DlgTitleBar {{ background: transparent; border: none; }}
+#TitleBarTitle {{ color: {ink}; font-size: 12px; font-weight: 600;
+                  letter-spacing: 0.6px; }}
+#TitleBarVer {{ color: {ink_dim2}; font-size: 11px; }}
+
+/* ── 无边框对话框：圆角卡片由 FramelessDialog 自己画，这里别再铺一层方底 ── */
+QDialog#Frameless {{ background: transparent; }}
+#DlgBody {{ background: transparent; }}
+#DlgLine {{ background: {fg(0.09)}; border: none; }}
+
 QLabel#WarnLabel {{ color: {RATING}; font-size: 12px; }}
 QLabel#SideSub {{
     color: {ink_dim2};

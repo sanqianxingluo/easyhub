@@ -5,12 +5,12 @@
 
 import os
 import urllib.request
-from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal
-from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QLinearGradient
-from PySide6.QtWidgets import QWidget, QLabel, QListWidget, QFrame
+from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal, QVariantAnimation, QRectF, QSize
+from PySide6.QtGui import (QPixmap, QImage, QPainter, QColor, QLinearGradient, QIcon)
+from PySide6.QtWidgets import QWidget, QLabel, QListWidget, QFrame, QAbstractButton
 
 import theme
-from paths import cache_dir
+from paths import cache_dir, resource
 
 
 CACHE_DIR = cache_dir()
@@ -211,6 +211,85 @@ class Glass(QFrame):
     def __init__(self, level="Glass", parent=None):
         super().__init__(parent)
         self.setObjectName(level)
+
+
+# ═══════════════════════ 开关（替代勾选框） ═══════════════════════
+class ToggleSwitch(QAbstractButton):
+    """自绘开关：轨道走强调色渐变，圆钮白色，切换有 150ms 滑动。
+
+    为什么不用 QCheckBox：「连到指定 WiFi 时自动走内网」是一句话配一个开关的语义，
+    方勾选框摆进玻璃面板里像另一个软件的控件；开关的轨道直接用当前配色的 a1→a2。
+    """
+
+    def __init__(self, parent=None, width=46, height=26):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(width, height)
+        self._pos = 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(150)
+        self._anim.valueChanged.connect(self._on_step)
+        self.toggled.connect(self._slide)
+
+    def sizeHint(self):
+        return QSize(self.width(), self.height())
+
+    # ---------- 动画 ----------
+    def _slide(self, on):
+        self._anim.stop()
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(1.0 if on else 0.0)
+        self._anim.start()
+
+    def _on_step(self, v):
+        self._pos = float(v)
+        self.update()
+
+    def setChecked(self, on):
+        """初始化时直接落位，不要播动画。"""
+        super().setChecked(on)
+        self._pos = 1.0 if on else 0.0
+        self.update()
+
+    # ---------- 画 ----------
+    def paintEvent(self, _e):
+        pal = theme.current()
+        light = (pal.get("mode") or "dark") == "light"
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        r = QRectF(self.rect()).adjusted(1.5, 2.5, -1.5, -2.5)
+        rad = r.height() / 2
+
+        # 轨道：关 = 一层浅灰；开 = 强调色渐变（按进度淡入，过渡才不跳）
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 42) if light else QColor(255, 255, 255, 40))
+        p.drawRoundedRect(r, rad, rad)
+        if self._pos > 0.01:
+            g = QLinearGradient(r.topLeft(), r.bottomRight())
+            g.setColorAt(0.0, QColor(pal["a1"]))
+            g.setColorAt(1.0, QColor(pal["a2"]))
+            p.setOpacity(self._pos)
+            p.setBrush(g)
+            p.drawRoundedRect(r, rad, rad)
+            p.setOpacity(1.0)
+
+        # 圆钮
+        d = r.height() - 6
+        x = r.left() + 3 + (r.width() - d - 6) * self._pos
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QRectF(x, r.top() + 3, d, d))
+
+        if not self.isEnabled():
+            p.setBrush(QColor(10, 12, 18, 90))
+            p.drawRoundedRect(r, rad, rad)
+
+
+def app_icon():
+    """应用图标（assets\easyhub.ico）；缺文件时返回空 QIcon，不影响启动。"""
+    p = resource("easyhub.ico")
+    return QIcon(p) if p else QIcon()
 
 
 def chip(text):

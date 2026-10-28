@@ -4,7 +4,7 @@
 连接时按顺序试，哪个通就用哪个；开着「WiFi 自动切换」时，
 连着家里 WiFi 就优先内网，否则优先外网。
 
-配置文件：程序目录下的 servers.json
+配置文件：Easyhub\config\servers.json（目录规则见 paths.py）
 """
 import json
 import os
